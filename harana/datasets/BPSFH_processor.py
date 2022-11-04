@@ -15,19 +15,18 @@ from torch.utils.data import Dataset
 
 class BPSFHDataset(Dataset):
 
-	def __init__(self, dataset_root_dir, frame_type, fpqn):
+	def __init__(self, dataset_root_dir, sample_size, frame_type, tpqn, fpqn):
 		dataset_name = "BPSFH"
 
 		# The file path of the samples generated from the dataset
-		sample_tensors_filepath = os.path.join(os.getcwd(), dataset_root_dir, "BPSFH.sample_tensors")
-
+		sample_tensors_filepath = os.path.join(os.getcwd(), dataset_root_dir, "BPSFH/sample_tensors")
 		# If the samples already exit, read them in
 		if os.path.isfile(sample_tensors_filepath):
 			self.sample_tensors = torch.load(sample_tensors_filepath)
 		# Otherwise, read from the raw dataset
 		else:
 			# Initialize the data reader for BPSFH dataset
-			self.data_reader = BPSFH_DataReader(dataset_root_dir = dataset_root_dir, dataset_name = dataset_name, fpqn = fpqn)
+			self.data_reader = BPSFH_DataReader(dataset_root_dir=dataset_root_dir, sample_size=sample_size, dataset_name=dataset_name, tpqn=tpqn, fpqn=fpqn)
 			print(f"Data reader initialized for {dataset_name}")
 
 			print("\nReading data...")
@@ -42,16 +41,27 @@ class BPSFHDataset(Dataset):
 			print("Done!")
 			# And save them to the designated filepath
 			torch.save(self.sample_tensors, sample_tensors_filepath)
+		
+		self.num_sample = self.sample_tensors[0].shape[0]
+
+
 
 
 	def __getitem__(self, index):
-		data = {}
-		data["notes_piano_roll"] = self.sample_tensors[0][index]
-		data["notes_pc_roll_existence"] = self.sample_tensors[1][index]
-		data["notes_pc_roll_accumulation"] = self.sample_tensors[2][index]
-		data["chord_sequence"] = self.sample_tensors[3][index]
+		sample = {}
+		sample["note_exist_seq"] = self.sample_tensors[0][index]
+		sample["note_dist_seq"] = self.sample_tensors[1][index]
+		sample["pc_exist_seq"] = self.sample_tensors[2][index]
+		sample["pc_dist_seq"] = self.sample_tensors[3][index]
+		sample["chord_seq"] = self.sample_tensors[4][index]
+		sample["song_idx"] = self.sample_tensors[5][index]
+		sample["sample_idx_in_song"] = self.sample_tensors[6][index]
+		#print(sample["pc_dist_seq"].shape)
 
-		return data
+		return sample
+
+	def __len__(self):
+		return self.num_sample
 
 class BPSFH_DataReader(HADataReader):
 
@@ -92,8 +102,8 @@ class BPSFH_DataReader(HADataReader):
 	}
 
 
-	def __init__(self, dataset_root_dir, dataset_name, fpqn):
-		super().__init__(dataset_root_dir, dataset_name, fpqn)
+	def __init__(self, dataset_root_dir, sample_size, dataset_name, tpqn, fpqn):
+		super().__init__(dataset_root_dir, sample_size, dataset_name, tpqn, fpqn)
 
 		# Num of songs in the dataset
 		self.num_song = 32
@@ -129,13 +139,18 @@ class BPSFH_DataReader(HADataReader):
 
 					# Get the song index
 					song_idx = int(subdir.split("/")[-1])
-
 					# Check if each type of information is needed and read them in
 					if note:
 						self.notes_all_song[song_idx] = self.read_notes(os.path.join(subdir, notes_filename))
 					if chord:
 						self.chords_all_song[song_idx] = self.read_chords(os.path.join(subdir, chords_filename))
-
+					'''
+					# Check if each type of information is needed and read them in
+					if note:
+						self.notes_all_song[song_idx] = self.read_notes(os.path.join(subdir, notes_filename))
+					if chord:
+						self.chords_all_song[song_idx] = self.read_chords(os.path.join(subdir, chords_filename))
+					'''
 	
 	def read_notes(self, notes_dir):
 		"""
@@ -150,7 +165,6 @@ class BPSFH_DataReader(HADataReader):
 		
 		# The list that stores all the notes
 		notes = []
-
 		# Open the file
 		with open(notes_dir, "r") as infile:
 
@@ -158,13 +172,14 @@ class BPSFH_DataReader(HADataReader):
 			for row in csv.reader(infile):
 
 				# Gather the relevant information
-				onset = round(float(row[0]) * self.fpqn)
+				onset = round(float(row[0]) * self.tpqn)
 				midi_num = int(row[1])
-				duration = round(float(row[3]) * self.fpqn)
+				duration = round(float(row[3]) * self.tpqn)
 
 				# Make an object for each note and append the object to the list
-				note_cur = core.Note(midi_num, duration, onset, onset + duration)
-				notes.append(note_cur)
+				if duration > 0:
+					note_cur = core.Note(midi_num, duration, onset, onset + duration - 1)
+					notes.append(note_cur)
 
 		return notes
 
@@ -207,8 +222,9 @@ class BPSFH_DataReader(HADataReader):
 			pre_offset = offset
 
 			# Convert the time units of chord boundaries from quarter notes to ticks
-			onset = round(onset * self.fpqn)
-			offset = round(offset * self.fpqn)
+			onset = onset * self.tpqn
+			offset = offset * self.tpqn - 1
+			duration = offset - onset + 1
 
 			# Get the pitch class of the key
 			key_pc = core.pn2pc_dict[self.pn_dataset2ours_dict[row[2].upper()]]
@@ -261,6 +277,6 @@ class BPSFH_DataReader(HADataReader):
 
 
 			# Make an object for each chord and append the object to the list
-			chords.append(chord.Chord(root_pc, quality, bass_pc, onset, offset))
+			chords.append(chord.Chord(root_pc, quality, bass_pc, duration, onset, offset))
 
 		return chords
