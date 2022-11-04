@@ -23,9 +23,25 @@ quality2chordal_degree_dict = {
 	'Dom7' : [0,4,7,10], 
 	'dim7' : [0,3,6,10], 
 	'hdi7' : [0,3,6,9],
-	'It+6' : [0,4,10],
-	'Fr+6' : [0,4,6,10],
-	'Gr+6' : [0,4,7,10],
+	'It+6' : [0,2,6],
+	'Fr+6' : [0,2,6,8],
+	'Gr+6' : [0,2,6,9],
+}
+
+# Dictionary from the chord quality to prior weight
+quality_prior = {
+	'M' : 1,
+	'm' : 1,
+	'+' : 0.1,
+	'-' : 0.5,
+	'Maj7' : 0.5,
+	'min7' : 0.5, 
+	'Dom7' : 1, 
+	'dim7' : 0.5, 
+	'hdi7' : 0.5,
+	'It+6' : 0.1,
+	'Fr+6' : 0.1,
+	'Gr+6' : 0.1,
 }
 
 # Dictionary from degree to pitch class distance from the root
@@ -51,7 +67,7 @@ degree2pc_add_dict = {
 
 class Chord:
 
-	def __init__(self, root_pc, quality, bass_pc, onset, offset):
+	def __init__(self, root_pc, quality, bass_pc, duration, onset, offset):
 
 		self.root_pc = root_pc
 		self.root_pn = core.pc2pn(self.root_pc)
@@ -60,6 +76,7 @@ class Chord:
 		self.bass_pn = core.pc2pn(self.bass_pc)
 		self.onset = onset
 		self.offset = offset
+		self.duration = duration
 		self.symbol = self.get_symbol()
 		# a distinct integer number to represent each chord label
 		self.index = self.get_index()
@@ -67,15 +84,15 @@ class Chord:
 
 	def __repr__(self):
 		if self.root_pn == self.bass_pn:
-			return f"Chord({self.root_pn}_{self.quality}, segment=[{self.onset}, {self.offset}])"
+			return f"Chord({self.root_pn}_{self.quality}, duration = {self.duration}, boundary=[{self.onset}, {self.offset}])"
 		else:
-			return f"Chord(label={self.root_pn}_{self.quality}/{self.bass_pn}, segment=[{self.onset}, {self.offset}])"
+			return f"Chord(label={self.root_pn}_{self.quality}/{self.bass_pn}, duration = {self.duration}, boundary=[{self.onset}, {self.offset}])"
 
 	def __str__(self):
 		if self.root_pn == self.bass_pn:
-			return f"Chord(label={self.root_pn}_{self.quality}, segment={self.boundary})"
+			return f"Chord(label={self.root_pn}_{self.quality}, duration = {self.duration}, boundary=[{self.onset}, {self.offset}])"
 		else:
-			return f"Chord(label={self.root_pn}_{self.quality}/{self.bass_pn}, segment=[{self.onset}, {self.offset}])"
+			return f"Chord(label={self.root_pn}_{self.quality}/{self.bass_pn}, duration = {self.duration}, boundary=[{self.onset}, {self.offset}])"
 
 	def get_symbol(self):
 		if self.root_pn == self.bass_pn:
@@ -94,6 +111,11 @@ class Chord:
 			return self.quality == other.quality and self.root_pc == other.root_pc and self.bass_pc == other.bass_pc
 
 # Get the pitch classes of the chordal notes of a chord
+def index2chordal_pc(index):
+	symbol = index2symbol(index)
+	root_pc, quality, _ = parse_symbol(symbol)
+	return get_chordal_pc(root_pc, quality)
+
 def get_chordal_pc(root_pc, quality):
 	return [(root_pc + x)%12 for x in quality2chordal_degree_dict[quality]]
 
@@ -107,7 +129,7 @@ def get_chordal_notes(root_pc, quality):
 	return chordal_notes
 
 # Parse a chord symbol to find the root, quality and the bass
-def parse_chord_symbol(symbol):
+def parse_symbol(symbol):
 
 	# check if the bass is different from the root
 	if '/' not in symbol:
@@ -121,7 +143,7 @@ def parse_chord_symbol(symbol):
 
 # Convert the symbol of a chord to its index
 def symbol2index(symbol):
-	root_pc, quality, bass_pc = parse_chord_symbol(symbol)
+	root_pc, quality, bass_pc = parse_symbol(symbol)
 
 	root_idx = root_pc_candidates.index(root_pc)
 	quality_idx = quality_candidates.index(quality)
