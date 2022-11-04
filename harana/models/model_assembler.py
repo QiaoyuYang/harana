@@ -391,6 +391,14 @@ class ScaledDotProductAttention(nn.Module):
 #   Decoder   #
 ###############
 
+class SoftmaxDecoder(nn.Module):
+
+	def __init__(self):
+		super(SoftmaxDecoder, self).__init__()
+
+	def forward(self, pc_embedding_seq):
+		return 0
+
 # Wrapper for the decoder
 class Decoder(nn.Module):
 	def __init__(self, decode_type, batch_size, sample_size, num_label, num_pc, segment_max_len, device, chord_transform_type):
@@ -401,6 +409,8 @@ class Decoder(nn.Module):
 		self.device = device
 		self.segment_score = SegmentScore(self.batch_size, sample_size, num_label, num_pc, chord_transform_type, self.device)
 		self.semicrf = SemiCRF(self.batch_size, sample_size, num_label, segment_max_len, self.device)
+
+		self.softmax = SoftmaxDecoder()
 
 		#label_dim = {'key': 24, 'tonocisation': 7, 'degree': 7, 'quality':12, 'inversion': 4, 'root': 24}
 		#self.nade = BlockNADE(embedding_size=num_pc, visible_dim_list=[24, 7, 7, 12, 4, 24], hidden_dim=350)
@@ -428,9 +438,12 @@ class Decoder(nn.Module):
 			log_z = self.semicrf.compute_log_z()
 			
 			return - torch.sum(path_score - log_z) / self.batch_size
+		elif self.decode_type == "softmax":
+			chord_seq_pred = self.softmax(pc_embedding_seq)
+
 		'''
 		elif self.decode_type == "nade":
-			chord_seq_pred = self.nade(x)
+			chord_seq_pred = self.nade(pc_embedding_seq)
 		'''
 
 

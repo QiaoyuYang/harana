@@ -243,6 +243,7 @@ def main(args_in):
 
 			# Backward propogation
 			print("Back propagation")
+			optimizer.zero_grad()
 			train_loss.backward()
 
 
