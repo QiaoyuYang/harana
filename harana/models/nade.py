@@ -72,3 +72,21 @@ class BlockNADE(nn.Module):
             )
         '''
         return []
+    def forward(self, x):
+        """Computes the forward pass.
+        Args:
+            x: Either a tensor of vectors with shape (n, input_dim) or images with shape
+                (n, 1, h, w) where h * w = input_dim.
+        Returns:
+            The result of the forward pass.
+        """
+        self._forward(x)
+        return 0
+
+    def sample(self, n_samples=None, conditioned_on=None):
+        """See the base class."""
+        with torch.no_grad():
+            conditioned_on = self._get_conditioned_on(n_samples, conditioned_on)
+            return self._forward(conditioned_on)[1]
+
+
