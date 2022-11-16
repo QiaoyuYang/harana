@@ -11,50 +11,50 @@ num_quality = 10
 
 # Candidate values for root pitch class, quality and bass pitch class
 root_pc_candidates = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
-quality_candidates = ['M', 'm', '+', '-', 'Maj7', 'min7', 'Dom7', 'hdi7', 'dim7', 'Aug6']
+quality_candidates = ['maj', 'min', 'aug', 'dim', 'maj7', 'min7', 'dom7', 'hdi7', 'dim7', 'aug6']
 bass_pc_candidates = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 
 # Dictionary from quality to the quality index
 quality2quality_index = {
-	'M' : 0,
-	'm' : 1,
-	'+' : 2,
-	'-' : 3,
-	'Maj7' : 4,
+	'maj' : 0,
+	'min' : 1,
+	'aug' : 2,
+	'dim' : 3,
+	'maj7' : 4,
 	'min7' : 5, 
-	'Dom7' : 6, 
+	'dom7' : 6, 
 	'dim7' : 7, 
 	'hdi7' : 8,
-	'Aug6' : 9,
+	'aug6' : 9,
 	}
 
 
 # Dictionary from the chord quality to chordal degrees
 quality2chordal_degree = {
-	'M' : [0,4,7],
-	'm' : [0,3,7],
-	'+' : [0,4,8],
-	'-' : [0,3,6],
-	'Maj7' : [0,4,7,11],
+	'maj' : [0,4,7],
+	'min' : [0,3,7],
+	'aug' : [0,4,8],
+	'dim' : [0,3,6],
+	'maj7' : [0,4,7,11],
 	'min7' : [0,3,7,10], 
-	'Dom7' : [0,4,7,10],
+	'dom7' : [0,4,7,10],
 	'hdi7' : [0,3,6,10],
 	'dim7' : [0,3,6,9],
-	'Aug6' : [0,2,6],
+	'aug6' : [0,2,6],
 }
 
 # Dictionary from the chord quality to prior weight
 quality_prior = {
-	'M' : 1,
-	'm' : 1,
-	'+' : 0.1,
-	'-' : 0.5,
-	'Maj7' : 0.5,
+	'maj' : 1,
+	'min' : 1,
+	'aug' : 0.1,
+	'dim' : 0.5,
+	'maj7' : 0.5,
 	'min7' : 0.5, 
-	'Dom7' : 1, 
-	'dim7' : 0.5, 
+	'dom7' : 1, 
 	'hdi7' : 0.5,
-	'Aug6' : 0.1,
+	'dim7' : 0.5,
+	'aug6' : 0.1,
 }
 
 # Dictionary from degree to pitch class distance from the root
@@ -139,7 +139,7 @@ class Harmony(Chord):
 		super().__init__(onset=kwargs["onset"], offset=kwargs["offset"])
 
 		# Get the pitch class of root from the key and the degree
-		if self.local_key.mode == "Maj":
+		if self.local_key.mode == "maj":
 			self.root_pc = (self.local_key.root_pc + degree2pc_add_Maj[self.primary_degree] + degree2pc_add_Maj[self.secondary_degree])%12
 		if self.local_key.mode == "min":
 			self.root_pc = (self.local_key.root_pc + degree2pc_add_min[self.primary_degree] + degree2pc_add_Maj[self.secondary_degree])%12
