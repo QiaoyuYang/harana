@@ -2,8 +2,7 @@
 
 # My import
 
-from ..utils import core
-from ..utils import chord
+from ..utils import core, harmony, chord, key, rn
 
 # External import
 import argparse
@@ -57,8 +56,13 @@ class HADataReader:
 		pc_exist_seq_all_samples = torch.tensor([])
 		pc_dist_seq_all_samples = torch.tensor([])
 		chord_seq_all_samples = torch.tensor([])
+		root_seq_all_samples = torch.tensor([])
+		quality_seq_all_samples = torch.tensor([])
+		key_seq_all_samples = torch.tensor([])
+		rn_seq_all_samples = torch.tensor([])
 		song_idx_all_samples = torch.tensor([])
 		sample_idx_in_song_all_samples = torch.tensor([])
+		qn_offset_cur_song_all_samples = torch.tensor([])
 		
 		# Enumerate through songs
 		# During data reading, the song indexes are encoded as positive integers, starting from 1
@@ -69,8 +73,11 @@ class HADataReader:
 			# Get the notes of current song
 			notes_cur_song = self.notes_all_song[song_idx]
 
-			# Get the chords of current song
-			chords_cur_song = self.chords_all_song[song_idx]
+			# Get the harmonies of current song
+			harmonies_cur_song = self.harmonies_all_song[song_idx]
+
+			# Get the quarter note offset of current song
+			qn_offset = float(self.qn_offset_all_song[song_idx])
 			
 			# Check the frame type
 			if frame_type == "inter_onset":
@@ -91,7 +98,7 @@ class HADataReader:
 				num_sample = int(np.floor(total_frame / self.sample_size))
 
 				# Initialize the tensors used to store data
-				note_exist_seq, note_dist_seq, pc_exist_seq, pc_dist_seq, chord_seq, song_idx_cur_song, sample_idx_cur_song = self.initialize_tensors(num_sample)
+				note_exist_seq, note_dist_seq, pc_exist_seq, pc_dist_seq, chord_seq, song_idx_cur_song, sample_idx_cur_song, qn_offset_cur_song = self.initialize_tensors(num_sample)
 
 				# Auxillary assignment for the first frame
 				sample_end_frame = 0
@@ -121,41 +128,27 @@ class HADataReader:
 
 				# Calculate the total number of ticks
 				total_ticks = notes_cur_song[-1].offset - notes_cur_song[0].onset
+
+				ticks_offset = qn_offset * self.tpqn
 				
 				# Calculate the number of samples in the current song
-				num_sample = int(np.floor(total_ticks / tps))
+				num_sample = int(np.floor((total_ticks - ticks_offset) / tps))
 
 				# Initialize the tensors used to store data
-				note_exist_seq, note_dist_seq, pc_exist_seq, pc_dist_seq, chord_seq, song_idx_cur_song, sample_idx_in_song = self.initialize_tensors(num_sample)
-				
-				"""
-				chordal_notes = torch.zeros(num_sample, sample_size, self.num_piano_pitch)
-				chordal_notes_appearing = torch.zeros(num_sample, sample_size, self.num_piano_pitch)
-				chordal_notes_missing = torch.zeros(num_sample, sample_size, self.num_piano_pitch)
-				non_chordal_notes = torch.zeros(num_sample, sample_size, self.num_piano_pitch)
-				"""
-
-				"""
-				chordal_pc = torch.zeros(num_sample, sample_size, self.num_pitch_class)
-				chordal_pc_appearing = torch.zeros(num_sample, sample_size, self.num_pitch_class)
-				chordal_pc_accumulation = torch.zeros(num_sample, sample_size, self.num_pitch_class)
-				chorda_pc_missing = torch.zeros(num_sample, sample_size, self.num_pitch_class)
-				non_chordal_pc = torch.zeros(num_sample, sample_size, self.num_pitch_class)
-				"""
+				note_exist_seq, note_dist_seq, pc_exist_seq, pc_dist_seq, chord_seq, root_seq, quality_seq, key_seq, rn_seq, song_idx_cur_song, sample_idx_in_song, qn_offset_cur_song = self.initialize_tensors(num_sample)
 
 				# Auxillary assignment for the first frame
 				sample_end_frame = -1
 
 				# get the starting tick of the first frame
-				global_start_tick = notes_cur_song[0].onset
-
-
+				global_start_tick = 0
 
 				# Iterate through each sample
 				for sample_idx in range(num_sample):
 					song_idx_cur_song[sample_idx] = song_idx
 					sample_idx_in_song[sample_idx] = sample_idx
-					#print(f"sample_idx: {sample_idx}")
+					qn_offset_cur_song[sample_idx] = qn_offset
+					
 					# get the frame boundary of the current sample
 					sample_start_frame = sample_end_frame + 1
 					sample_end_frame = sample_start_frame + self.sample_size - 1
@@ -165,7 +158,7 @@ class HADataReader:
 					sample_end_tick = sample_start_tick + tps - 1
 					# get the notes in the sample from all notes to reduce the search space of tick notes
 					notes_sample = self.get_notes_in_region(notes_cur_song, sample_start_tick, sample_end_tick)
-					chords_sample = self.get_chords_in_region(chords_cur_song, sample_start_tick, sample_end_tick)
+					harmonies_sample = self.get_harmonies_in_region(harmonies_cur_song, sample_start_tick, sample_end_tick)
 
 					# Iterate through each frame in the current sample
 					for frame_idx in range(self.sample_size):
@@ -177,38 +170,12 @@ class HADataReader:
 						# Get the notes in the frame from the sample notes
 						notes_frame = self.get_notes_in_region(notes_sample, frame_start_tick, frame_end_tick)
 						#print(notes_frame)
-						chords_frame = self.get_chords_in_region(chords_sample, frame_start_tick, frame_end_tick)
-						note_exist_seq, note_dist_seq, pc_exist_seq, pc_dist_seq, chord_seq = self.update_tensors(note_exist_seq, note_dist_seq, pc_exist_seq, pc_dist_seq, chord_seq, notes_frame, chords_frame, sample_idx, frame_idx)
+						harmonies_frame = self.get_harmonies_in_region(harmonies_sample, frame_start_tick, frame_end_tick)
 
-						"""
-						chord_cur = chords_tick[0]
-						chordal_notes_cur = chord.get_chordal_notes(chord_cur.root_pc, chord_cur.quality)
-						chordal_pc_cur = chord.get_chordal_pc(chord_cur.root_pc, chord_cur.quality)
-
-						for chordal_note_cur in chordal_notes_cur:
-							chordal_notes[sample_idx, frame_idx, chordal_note_cur - 1] = 1
-							chordal_pc[sample_idx, frame_idx, core.piano_pitch2pc(chordal_note_cur)] = 1
-							chordal_pc_accumulation[sample_idx, frame_idx, core.piano_pitch2pc(chordal_note_cur)] += 1
-						"""
-
-					#chordal_notes_appearing = piano_roll * chordal_notes
-					#chordal_notes_missing = chordal_notes - chordal_notes_appearing
-					#non_chordal_notes = piano_roll - chordal_notes_appearing
-
-					#chordal_pc_appearing = notes_pc_existence * chordal_pc
-					#chordal_pc_missing = chordal_pc - chordal_pc_appearing
-					#non_chordal_pc = notes_pc_existence - chordal_pc_appearing
+						note_exist_seq, note_dist_seq, pc_exist_seq, pc_dist_seq, chord_seq, root_seq, quality_seq, key_seq, rn_seq = self.update_tensors(note_exist_seq, note_dist_seq, pc_exist_seq, pc_dist_seq, chord_seq, root_seq, quality_seq, key_seq, rn_seq, notes_frame, harmonies_frame, sample_idx, frame_idx)
 
 			# Normalize the acculative pc tensors
 			note_dist_seq = note_dist_seq / note_dist_seq.sum(-1).unsqueeze(-1)
-			'''
-			for sample_idx in range(num_sample):
-				for frame_idx in range(self.sample_size):
-					if (note_dist_seq[sample_idx, frame_idx, :] != note_dist_seq[sample_idx, frame_idx, :]).numpy().any():
-						print(f"sample_idx: {sample_idx}")
-						print(f"frame_idx: {frame_idx}")
-			'''
-
 			pc_dist_seq = pc_dist_seq / pc_dist_seq.sum(-1).unsqueeze(-1)
 
 			# Concatenate the samples
@@ -217,10 +184,15 @@ class HADataReader:
 			pc_exist_seq_all_samples = torch.cat([pc_exist_seq_all_samples, pc_exist_seq], dim=0)
 			pc_dist_seq_all_samples = torch.cat([pc_dist_seq_all_samples, pc_dist_seq], dim=0)
 			chord_seq_all_samples = torch.cat([chord_seq_all_samples, chord_seq], dim=0)
+			root_seq_all_samples = torch.cat([root_seq_all_samples, root_seq], dim=0)
+			quality_seq_all_samples = torch.cat([quality_seq_all_samples, quality_seq], dim=0)
+			key_seq_all_samples = torch.cat([key_seq_all_samples, key_seq], dim=0)
+			rn_seq_all_samples = torch.cat([rn_seq_all_samples, rn_seq], dim=0)
 			song_idx_all_samples = torch.cat([song_idx_all_samples, song_idx_cur_song], dim=0)
 			sample_idx_in_song_all_samples = torch.cat([sample_idx_in_song_all_samples, sample_idx_in_song], dim=0)
+			qn_offset_cur_song_all_samples = torch.cat([qn_offset_cur_song_all_samples, qn_offset_cur_song], dim=0)
 
-		self.sample_tensors = [note_exist_seq_all_samples, note_dist_seq_all_samples, pc_exist_seq_all_samples, pc_dist_seq_all_samples, chord_seq_all_samples, song_idx_all_samples, sample_idx_in_song_all_samples]
+		self.sample_tensors = [note_exist_seq_all_samples, note_dist_seq_all_samples, pc_exist_seq_all_samples, pc_dist_seq_all_samples, chord_seq_all_samples, root_seq_all_samples, quality_seq_all_samples, key_seq_all_samples, rn_seq_all_samples, song_idx_all_samples, sample_idx_in_song_all_samples, qn_offset_cur_song_all_samples]
 
 	# Initialize the tensors to store the ground truth data
 	def initialize_tensors(self, num_sample):
@@ -240,17 +212,32 @@ class HADataReader:
 		# one chord label for each frame
 		chord_seq = torch.zeros(num_sample, self.sample_size)
 
+		# one root label for each frame
+		root_seq = torch.zeros(num_sample, self.sample_size)
+
+		# one quality label for each frame
+		quality_seq = torch.zeros(num_sample, self.sample_size)
+
+		# one key label for each frame
+		key_seq = torch.zeros(num_sample, self.sample_size)
+
+		# one rn label for each frame
+		rn_seq = torch.zeros(num_sample, self.sample_size)
+
 		# the song index of the each sample
 		song_idx_cur_song = torch.zeros(num_sample)
 
-		# the sample index of the each sample
+		# the sample index in the song of the each sample
 		sample_idx_in_song = torch.zeros(num_sample)
 
+		# the quarter note offset of the song of the each sample
+		qn_offset_cur_song = torch.zeros(num_sample)
 
-		return note_exist_seq, note_dist_seq, pc_exist_seq, pc_dist_seq, chord_seq, song_idx_cur_song, sample_idx_in_song
+
+		return note_exist_seq, note_dist_seq, pc_exist_seq, pc_dist_seq, chord_seq, root_seq, quality_seq, key_seq, rn_seq, song_idx_cur_song, sample_idx_in_song, qn_offset_cur_song
 
 	# Update the tensors as new samples are created
-	def update_tensors(self, note_exist_seq, note_dist_seq, pc_exist_seq, pc_dist_seq, chord_seq, notes_frame, chords_frame, sample_idx, frame_idx):
+	def update_tensors(self, note_exist_seq, note_dist_seq, pc_exist_seq, pc_dist_seq, chord_seq, root_seq, quality_seq, key_seq, rn_seq, notes_frame, harmonies_frame, sample_idx, frame_idx):
 		
 		# Iterate through each note in the current frame
 		for note_cur in notes_frame:
@@ -264,7 +251,12 @@ class HADataReader:
 			pc_dist_seq[sample_idx, frame_idx, note_cur.pc] += note_cur.duration
 
 		# Update the feature tensor of chords
-		chord_seq[sample_idx, frame_idx] = chords_frame[0].get_index()
+		harmony_frame = harmonies_frame[0]
+		chord_seq[sample_idx, frame_idx] = harmony_frame.this_chord.chord_index
+		root_seq[sample_idx, frame_idx] = harmony_frame.this_chord.root_pc
+		quality_seq[sample_idx, frame_idx] = harmony_frame.this_chord.quality_index
+		key_seq[sample_idx, frame_idx] = harmony_frame.roman_numeral.local_key.key_index
+		rn_seq[sample_idx, frame_idx] = harmony_frame.roman_numeral.rn_index
 		
 		if len(notes_frame) == 0:
 			note_exist_seq[sample_idx, frame_idx, self.num_piano_pitch - 1] = 1
@@ -273,7 +265,7 @@ class HADataReader:
 			pc_dist_seq[sample_idx, frame_idx, self.num_pc - 1] = 1
 
 
-		return note_exist_seq, note_dist_seq, pc_exist_seq, pc_dist_seq, chord_seq
+		return note_exist_seq, note_dist_seq, pc_exist_seq, pc_dist_seq, chord_seq, root_seq, quality_seq, key_seq, rn_seq
 
 	# Split all the notes in a song into inter-onset regions (unit)
 	def notes2units(self, notes_all):
@@ -334,18 +326,18 @@ class HADataReader:
 				notes_region.append(core.Note(note_cur.midi_num, duration_overlap, start_time_overlap, end_time_overlap))
 		return notes_region
 
-	# Get the (partial) chord region in a time frame
-	def get_chords_in_region(self, chords_all, start_time, end_time):
+	# Get the (partial) harmonies in a time frame
+	def get_harmonies_in_region(self, harmonies_all, start_time, end_time):
 		
-		chords_region = []
-		for chord_cur in chords_all:
-			chord_cur_onset = chord_cur.onset
-			chord_cur_offset = chord_cur.offset
-			if self.check_duration_overlap(chord_cur_onset, chord_cur_offset, start_time, end_time):
-				start_time_overlap, end_time_overlap, duration_overlap = self.get_duration_overlap(chord_cur.onset, chord_cur.offset, start_time, end_time)
-				chords_region.append(chord.Chord(chord_cur.root_pc, chord_cur.quality, chord_cur.bass_pc, duration_overlap, start_time_overlap, end_time_overlap))
+		harmonies_region = []
+		for harmony_cur in harmonies_all:
+			harmony_cur_onset = harmony_cur.onset
+			harmony_cur_offset = harmony_cur.offset
+			if self.check_duration_overlap(harmony_cur_onset, harmony_cur_offset, start_time, end_time):
+				start_time_overlap, end_time_overlap, duration_overlap = self.get_duration_overlap(harmony_cur.onset, harmony_cur.offset, start_time, end_time)
+				harmonies_region.append(harmony.Harmony(local_key=harmony_cur.local_key, degree=harmony_cur.degree, quality=harmony_cur.quality, inversion=harmony_cur.inversion, onset=start_time_overlap, offset=end_time_overlap))
 		
-		return chords_region
+		return harmonies_region
 
 	# Check if the time span of a event overlap with another given time span
 	def check_duration_overlap(self, event_onset, event_offset, start_time, end_time):

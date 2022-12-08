@@ -54,9 +54,13 @@ class BPSFHDataset(Dataset):
 		sample["pc_exist_seq"] = self.sample_tensors[2][index]
 		sample["pc_dist_seq"] = self.sample_tensors[3][index]
 		sample["chord_seq"] = self.sample_tensors[4][index]
-		sample["song_idx"] = self.sample_tensors[5][index]
-		sample["sample_idx_in_song"] = self.sample_tensors[6][index]
-		#print(sample["pc_dist_seq"].shape)
+		sample["root_seq"] = self.sample_tensors[5][index]
+		sample["quality_seq"] = self.sample_tensors[6][index]
+		sample["key_seq"] = self.sample_tensors[7][index]
+		sample["rn_seq"] = self.sample_tensors[8][index]
+		sample["song_idx"] = self.sample_tensors[9][index]
+		sample["sample_idx_in_song"] = self.sample_tensors[10][index]
+		sample["qn_offset"] = self.sample_tensors[11][index]
 
 		return sample
 
@@ -67,8 +71,8 @@ class BPSFH_DataReader(HADataReader):
 
 	# The data reader for the Beethoven Piano Sonata-Functional Harmony dataset
 
-	# A dictionary to convert the pitch names used in the BPSFH to those in our vocabulary
-	pn_dataset2ours_dict = {
+	# A dictionary to convert the pitch spellings used in the BPSFH to those in our vocabulary
+	ps_dataset2ours = {
 	"C" : "C",
 	"C+" : "C#",
 	"D-" : "Db",
@@ -89,16 +93,17 @@ class BPSFH_DataReader(HADataReader):
     }
 
     # A dictionary to convert the chord qualities used in the BPSFH to those in our vocabulary
-	chord_quality_dataset2ours_dict = {
-	"M" : "M",
-	"m" : "m",
-	"a" : "+",
-	"d" : "-",
-	"M7" : "Maj7",
+	chord_quality_dataset2ours = {
+	"M" : "maj",
+	"m" : "min",
+	"a" : "aug",
+	"d" : "dim",
+	"M7" : "maj7",
 	"m7" : "min7",
-	"D7" : "Dom7",
+	"D7" : "dom7",
+	"h7" : "hdi7",
 	"d7" : "dim7",
-	"h7" : "hdi7"
+	"a6" : "aug6"
 	}
 
 
@@ -108,12 +113,18 @@ class BPSFH_DataReader(HADataReader):
 		# Num of songs in the dataset
 		self.num_song = 32
 
-		# Hash tables to find the notes and chords of a song according to the song index
+		# Hash tables to find the notes and harmonies of a song according to the song index
 		self.notes_all_song = {}
-		self.chords_all_song = {}
+		self.harmonies_all_song = {}
+
+		# The time signature of each song
+		self.time_signature_all_song = {}
+		
+		# The length in quarter notes of the inital imcompelte measure of each song
+		self.qn_offset_all_song = {}
 
 
-	def read_all(self, note=True, chord=True):
+	def read_all(self, note=True, harmony=True, meta=True):
 		"""
 		Read all the data of the dataset
 
@@ -122,14 +133,15 @@ class BPSFH_DataReader(HADataReader):
 		note: boolean
 			If true, the notes in the dataset will be read in
 
-		chord: boolean
-			If true, the chords in the dataset will be read in
+		harmony: boolean
+			If true, the harmonies in the dataset will be read in
 
 		"""
 
-		# The names of the files that store the information of notes and chords, respectively
+		# The names of the files that store the information of notes and harmonies, respectively
 		notes_filename = "notes.csv"
-		chords_filename = "chords.xlsx"
+		harmonies_filename = "chords.xlsx"
+		meta_filename = "meta"
 		print(self.dataset_dir)
 		# Walk through all the files and sub-directory in the dataset
 		for subdir, dirs, files in os.walk(self.dataset_dir):
@@ -143,15 +155,35 @@ class BPSFH_DataReader(HADataReader):
 					if note:
 						self.notes_all_song[song_idx] = self.read_notes(os.path.join(subdir, notes_filename))
 					if chord:
-						self.chords_all_song[song_idx] = self.read_chords(os.path.join(subdir, chords_filename))
-					'''
-					# Check if each type of information is needed and read them in
-					if note:
-						self.notes_all_song[song_idx] = self.read_notes(os.path.join(subdir, notes_filename))
-					if chord:
-						self.chords_all_song[song_idx] = self.read_chords(os.path.join(subdir, chords_filename))
-					'''
+						self.harmonies_all_song[song_idx] = self.read_harmonies(os.path.join(subdir, harmonies_filename))
+					if meta:
+						meta_info = self.read_meta(os.path.join(subdir, meta_filename))
+						self.time_signature_all_song[song_idx] = meta_info["time_signature"]
+						self.qn_offset_all_song[song_idx] = meta_info["qn_offset"]
 	
+	def read_meta(self, meta_dir):
+		"""
+		Read the meta information of one song in the dataset
+
+		Parameters
+		----------
+		meta_dir: string
+			The directory of the file that stores the meta information of the current song
+		"""
+
+		# The dictionary that stores all the meta information
+		meta = {}
+		# Open the file
+		with open(meta_dir, "r") as infile:
+
+			# Iterate through each row, which stores one type of meta information
+			for line in infile.readlines():
+				# Parse the row and store the information in the dictionary
+				meta_name, meta_value = line.rstrip("\n").split(" ")
+				meta[meta_name] = meta_value
+
+		return meta
+
 	def read_notes(self, notes_dir):
 		"""
 		Read the notes of one song in the dataset
@@ -183,9 +215,9 @@ class BPSFH_DataReader(HADataReader):
 
 		return notes
 
-	def read_chords(self, chords_dir):
+	def read_harmonies(self, chords_dir):
 		"""
-		Read the chords of one song in the dataset
+		Read the harmony information of one song in the dataset
 
 		Parameters
 		----------
@@ -208,8 +240,11 @@ class BPSFH_DataReader(HADataReader):
 		for idx, row in xl_file.iterrows():
 			chords_data_all.append(list(row))
 
-		# The list that stores all the notes
-		chords = []
+		# The list that stores all the harmonies
+		harmonies = []
+
+		# The list that stors all the keys
+		keys = []
 
 		pre_offset = -99
 		for row in chords_data_all:
@@ -224,13 +259,21 @@ class BPSFH_DataReader(HADataReader):
 			# Convert the time units of chord boundaries from quarter notes to ticks
 			onset = onset * self.tpqn
 			offset = offset * self.tpqn - 1
-			duration = offset - onset + 1
 
-			# Get the pitch class of the key
-			key_pc = core.pn2pc_dict[self.pn_dataset2ours_dict[row[2].upper()]]
+			# Get the key
+			if row[2].upper() == row[2]:
+				key_mode = "maj"
+			else:
+				key_mode = "min"
+			key_tonic_ps = self.ps_dataset2ours[row[2].upper()]
+			local_key = key.Key(tonic_ps = key_tonic_ps, mode = key_mode)
 			
 			# Get the degree
 			degree = str(row[3])
+
+
+			# Get the quality
+			quality = self.chord_quality_dataset2ours[str(row[4])]
 
 			# Get the inversion
 			inversion = str(row[5])
@@ -239,44 +282,19 @@ class BPSFH_DataReader(HADataReader):
 			if degree == "1.1":
 				degree = "1"
 
-			if inversion == "0.1":
-				inversion = "0"
-
-			# Split the primary degree and the secondary degree
-			# Get the pitch class of root from the key and the degree
 			if "/" in degree:
 				secondary_degree, primary_degree = degree.split("/")
-				root_pc = (key_pc + chord.degree2pc_add_dict[primary_degree] + chord.degree2pc_add_dict[secondary_degree])%12
 			else:
-				root_pc = (key_pc + chord.degree2pc_add_dict[degree])%12
-
-			# Get the quality
-			quality = str(row[4])
-
-			# Get the specific type of augmented sixth chord if there is one because they have different chordal notes
-			# The type is specified by the roman numeral entry
-			if quality == "a6":
-				quality = row[6]
-				if "/" in quality:
-					quality = row[6].split("/")[0]
-			else:
-				quality = self.chord_quality_dataset2ours_dict[quality]
-
-			# Get the pitch classes of the chordal notes of the chord
-			chordal_pc = chord.get_chordal_pc(root_pc, quality)
-
-			# Get the pitch class of the bass note depending on the inversion
-			if inversion == "0":
-				bass_pc = chordal_pc[0]
-			if inversion == "1":
-				bass_pc = chordal_pc[1]
-			if inversion == "2":
-				bass_pc = chordal_pc[2]
-			if inversion == "3":
-				bass_pc = chordal_pc[3]
-
-
+				primary_degree = degree
+				secondary_degree = "1"
+			
+			if inversion == "0.1":
+				inversion = "0"
+			
 			# Make an object for each chord and append the object to the list
-			chords.append(chord.Chord(root_pc, quality, bass_pc, duration, onset, offset))
+			harmonies.append(harmony.Harmony(local_key = local_key, degree = degree, quality = quality, inversion = inversion, onset = onset, offset = offset))
 
-		return chords
+
+
+
+		return harmonies
