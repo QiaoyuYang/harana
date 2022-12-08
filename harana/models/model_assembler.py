@@ -1,7 +1,7 @@
 # Building the model
 
 # My import
-from ..utils import chord
+from ..utils import core, harmony, chord, key, rn
 from .semi_crf import SemiCRF
 from .densenet import DenseNet, TransitionBlock
 from .nade import BlockNADE
@@ -26,11 +26,11 @@ class NoteContextTransform(nn.Module):
 		transform_type:		type of note context transformation
 
 	'''
-	def __init__(self, num_pc, transform_type):
+	def __init__(self, num_pc, embedding_size, transform_type):
 		super(NoteContextTransform, self).__init__()
 
 		# Initialize a DenseGRU module
-		self.dense_gru = DenseGRU(num_pc)
+		self.dense_gru = DenseGRU(num_pc, embedding_size)
 
 		# Initialize a channel-wise 1d CNN module
 		self.cnn = CNN1d(num_pc)
@@ -115,7 +115,7 @@ class DenseGRU(nn.Module):
 
 	The parameter values follow the setup in Micchi et al, 2021
 	'''
-	def __init__(self, num_pc, block_depths=[3, 2, 2], growth_rates=[10, 4, 4], kernel_sizes=[7, 3, 3],
+	def __init__(self, num_pc, embedding_size, block_depths=[3, 2, 2], growth_rates=[10, 4, 4], kernel_sizes=[7, 3, 3],
                  bottleneck=True, drop_rate=0.0, gru_hidden_size=178):
 		super(DenseGRU, self).__init__()
 
@@ -129,7 +129,7 @@ class DenseGRU(nn.Module):
 		self.gru = nn.GRU(input_size=num_feature_after_densenet, hidden_size=gru_hidden_size, batch_first=True)
 
 		# Project the embedding size of each frame back to the number of pitch class
-		self.linear = nn.Linear(gru_hidden_size, num_pc)
+		self.bottleneck = nn.Linear(gru_hidden_size, embedding_size)
 
 	def forward(self, x):
 		
@@ -152,8 +152,8 @@ class DenseGRU(nn.Module):
 		out, _ = self.gru(out)
 		# out.shape: (batch_size, sample_size, gru_hidden_size)
 
-		out = self.linear(out)
-		# out.shape: (batch_size, sample_size, num_pc)
+		out = self.bottleneck(out)
+		# out.shape: (batch_size, sample_size, embedding_size)
 
 		return out
 
@@ -173,7 +173,7 @@ class ChordalPCWeightTransform(nn.Module):
 		transform_type:		type of chordal pc weight transformation
 		device:				the device where the model is running
 	'''
-	def __init__(self, num_label, num_pc, chord_transform_type, device):
+	def __init__(self, num_label, num_pc, embedding_size, chord_transform_type, device):
 		super(ChordalPCWeightTransform, self).__init__()
 		
 		self.num_label = num_label
@@ -189,8 +189,8 @@ class ChordalPCWeightTransform(nn.Module):
 		# The weight vector is initialized to be approximately the importance of each scale degree
 		self.scale_degree_weight = nn.Parameter(torch.tensor([1, 0.01, 0.01, 0.9, 0.9, 0.01, 0.1, 0.8, 0.1, 0.1, 0.9, 0.7, 0]))
 		
-		self.linear1 = nn.Linear(num_pc, num_pc)
-		self.linear2 = nn.Linear(num_pc, num_pc)
+		self.self_linear = nn.Linear(num_pc, num_pc)
+		self.linear2embedding = nn.Linear(num_pc, embedding_size)
 		self.softmax = nn.Softmax(dim=2)
 		
 		self.chord_transform_type = chord_transform_type
@@ -207,7 +207,7 @@ class ChordalPCWeightTransform(nn.Module):
 		for label_idx in range(self.num_label):
 
 			# Get the root pc of the chord
-			root_pc, _, _ = chord.parse_symbol(chord.index2symbol(label_idx))
+			root_pc, _ = chord.parse_chord_index(label_idx)
 
 			# Slice the 12 actual pitch classes from the vector
 			chordal_pc_vector_cur_12 = chordal_pc_vector[:, label_idx, :self.num_pc - 1]
@@ -238,10 +238,10 @@ class ChordalPCWeightTransform(nn.Module):
 		elif self.chord_transform_type == "weight_vector":
 			out = out * self.scale_degree_weight
 		elif self.chord_transform_type == "fc1":
-			out = self.linear1(out)
+			out = self.linear2embedding(out)
 		elif self.chord_transform_type == "fc1":
-			out = self.linear1(out)
-			out = self.linear2(out)
+			out = self.self_linear(out)
+			out = self.linear2embedding(out)
 		
 		out = self.permute_pc(out, mode="original")
 		
@@ -256,7 +256,7 @@ class ChordalPCWeightTransform(nn.Module):
 
 # Wrapper to compute the score for each segment
 class SegmentScore(nn.Module):
-	def __init__(self, batch_size, sample_size, num_label, num_pc, chord_transform_type, device):
+	def __init__(self, batch_size, sample_size, num_label, num_pc, embedding_size, chord_transform_type, device):
 		super(SegmentScore, self).__init__()
 		
 		self.batch_size = batch_size
@@ -267,7 +267,7 @@ class SegmentScore(nn.Module):
 		self.device = device
 
 		# Initialize the chordal pc weight transform module
-		self.chordal_pc_weight_transform = ChordalPCWeightTransform(self.num_label, self.num_pc, chord_transform_type, self.device)
+		self.chordal_pc_weight_transform = ChordalPCWeightTransform(self.num_label, self.num_pc, embedding_size, chord_transform_type, self.device)
 
 		# Initialize the chordal pc vectors
 		self.chordal_pc_vector = torch.zeros(self.num_label, self.num_pc, requires_grad=False)
@@ -300,7 +300,7 @@ class SegmentScore(nn.Module):
 	def compute_chordal_pc_vector_single(self, label_idx):
 
 		# Extract the chordal pc of the chord
-		chordal_pc = chord.index2chordal_pc(label_idx)		
+		chordal_pc = chord.chord_index2chordal_pc(label_idx)		
 
 		# Create a 1-hot vector for the chordal pc
 		chordal_pc_vector = torch.zeros(self.num_pc, 1)
@@ -315,6 +315,7 @@ class SegmentScore(nn.Module):
 	# Compute the segment score for all segments (with all chord labels)
 	# Since the computation is the same for all chord labels, we parallelize across them
 	def compute_segment_score(self, pc_embedding_seq):
+		chordal_pc_embedding = self.chordal_pc_weight_transform(self.chordal_pc_vector)
 		
 		# The variable to store all the segment scores
 		segment_score = torch.zeros(self.batch_size, self.sample_size, self.sample_size, self.num_label)
@@ -327,19 +328,19 @@ class SegmentScore(nn.Module):
 			for end_frame in range(start_frame, self.sample_size):
 
 				# Update the segment scores of the current segment boundary
-				segment_score[:, start_frame, end_frame, :] = self.compute_segment_score_single(start_frame=start_frame, pc_embedding_seq_segment=pc_embedding_seq[:, start_frame : end_frame + 1, :])
+				segment_score[:, start_frame, end_frame, :] = self.compute_segment_score_single(pc_embedding_seq[:, start_frame : end_frame + 1, :], chordal_pc_embedding)
 
 		return segment_score
 	
 
 	# Compute the segment score for a single segment (with all chord labels)
-	def compute_segment_score_single(self, start_frame, pc_embedding_seq_segment):
+	def compute_segment_score_single(self, pc_embedding_seq_segment, chordal_pc_embedding):
 
 		# Compute the attended note embedding of the segment
-		attended_pc_embedding, attention = self.chord_note_attention(self.chordal_pc_vector, pc_embedding_seq_segment, pc_embedding_seq_segment, mask=None)
+		attended_pc_embedding, attention = self.chord_note_attention(chordal_pc_embedding, pc_embedding_seq_segment, pc_embedding_seq_segment, mask=None)
 
 		# compute the segment score
-		segment_score_single = (self.chordal_pc_weight * attended_pc_embedding).sum(-1)
+		segment_score_single = (chordal_pc_embedding * attended_pc_embedding).sum(-1)
 		
 		#segment_score_single = segment_score_single.mul(self.chord_prior)
 		
@@ -393,24 +394,47 @@ class ScaledDotProductAttention(nn.Module):
 
 class SoftmaxDecoder(nn.Module):
 
-	def __init__(self):
+	def __init__(self, embedding_size, label_type):
 		super(SoftmaxDecoder, self).__init__()
 
+		self.label_type = label_type
+		
+		if self.label_type == "root_quality":
+			self.root_head = nn.Linear(embedding_size, core.num_pc)
+			self.quality_head = nn.Linear(embedding_size, core.num_quality)
+		if self.label_type == "key_rn":
+			self.key_head = nn.Linear(embedding_size, key.num_key)
+			self.rn_head = nn.Linear(embedding_size, rn.num_rn)
+		self.softmax = nn.Softmax(dim=2)
+
 	def forward(self, pc_embedding_seq):
-		return 0
+		if self.label_type == "root_quality":
+			root_prob_seq = self.softmax(self.root_head(pc_embedding_seq))
+			quality_prob_seq = self.softmax(self.quality_head(pc_embedding_seq))
+			return root_prob_seq, quality_prob_seq
+		if self.label_type == "key_rn":
+			key_prob_seq = self.softmax(self.key_head(pc_embedding_seq))
+			rn_prob_seq = self.softmax(self.rn_head(pc_embedding_seq))
+			return key_prob_seq, rn_prob_seq
 
 # Wrapper for the decoder
 class Decoder(nn.Module):
-	def __init__(self, decode_type, batch_size, sample_size, num_label, num_pc, segment_max_len, device, chord_transform_type):
+	def __init__(self, decode_type, label_type, batch_size, sample_size, num_label, num_pc, segment_max_len, device, chord_transform_type, embedding_size):
 		super(Decoder, self).__init__()
 
 		self.batch_size = batch_size
 		self.decode_type = decode_type
+		self.label_type = label_type
 		self.device = device
-		self.segment_score = SegmentScore(self.batch_size, sample_size, num_label, num_pc, chord_transform_type, self.device)
-		self.semicrf = SemiCRF(self.batch_size, sample_size, num_label, segment_max_len, self.device)
 
-		self.softmax = SoftmaxDecoder()
+		self.pc_embedding_seq = torch.zeros(batch_size, sample_size, embedding_size)
+
+		self.segment_score = SegmentScore(self.batch_size, sample_size, num_label, num_pc, embedding_size, chord_transform_type, self.device)
+		transition_importance = 0.001 / (sample_size - 1)
+		self.semicrf = SemiCRF(self.batch_size, sample_size, num_label, segment_max_len, self.device, transition_importance)
+
+		self.softmax_decoder = SoftmaxDecoder(embedding_size, label_type)
+		self.cross_entropy_loss = nn.CrossEntropyLoss()
 
 		#label_dim = {'key': 24, 'tonocisation': 7, 'degree': 7, 'quality':12, 'inversion': 4, 'root': 24}
 		#self.nade = BlockNADE(embedding_size=num_pc, visible_dim_list=[24, 7, 7, 12, 4, 24], hidden_dim=350)
@@ -419,32 +443,50 @@ class Decoder(nn.Module):
 		
 		if self.decode_type == "semi_crf":
 			return self.semicrf.decode()
-		'''
-		elif decode_type == "nade":
-			return self.nade(self.pc_embedding_seq)
-		'''
 
-	def compute_loss(self, pc_embedding_seq, chord_seq):
+		if self.decode_type == "softmax":
+			if self.label_type == "root_quality":
+				root_prob_seq, quality_prob_seq = self.softmax_decoder(self.pc_embedding_seq)
+				root_seq_pred = root_prob_seq.argmax(dim=2)
+				quality_seq_pred = quality_prob_seq.argmax(dim=2)
+				return [root_seq_pred, quality_seq_pred]
+			if self.label_type == "key_rn":
+				key_prob_seq, rn_prob_seq = self.softmax_decoder(self.pc_embedding_seq)
+				key_seq_pred = key_prob_seq.argmax(dim=2)
+				rn_seq_pred = rn_prob_seq.argmax(dim=2)
+				return [key_seq_pred, rn_seq_pred]
+
+	def compute_loss_semi_crf(self, chord_seq, key_seq, rn_seq):
+
+		print("Computing segment score")
+		self.semicrf.segment_score = self.segment_score(self.pc_embedding_seq)
+			
+		print("Computing path score")
+		path_score = self.semicrf.compute_path_score(chord_seq)
+
+		transition_weight_L2_loss = self.semicrf.transitions.flatten().square().sum()
+			
+		print("Computing log z")
+		log_z = self.semicrf.compute_log_z()
+
+		nll = - torch.sum(path_score - log_z) / self.batch_size
+			
+		return nll + transition_weight_L2_loss
+	
+	def compute_loss_cross_entropy(self, head1_seq_gt, head2_seq_gt):
 		
-		self.pc_embedding_seq = pc_embedding_seq
-		if self.decode_type == "semi_crf":
-			print("Computing segment score")
-			self.semicrf.segment_score = self.segment_score(pc_embedding_seq)
+		head1_seq_pred, head2_seq_pred = self.softmax_decoder(self.pc_embedding_seq)
 			
-			print("Computing path score")
-			path_score = self.semicrf.compute_path_score(chord_seq)
-			
-			print("Computing log z")
-			log_z = self.semicrf.compute_log_z()
-			
-			return - torch.sum(path_score - log_z) / self.batch_size
-		elif self.decode_type == "softmax":
-			chord_seq_pred = self.softmax(pc_embedding_seq)
+		head1_loss = self.cross_entropy_loss(head1_seq_pred, head1_seq_gt)
+		head2_loss = self.cross_entropy_loss(head2_seq_pred, head2_seq_gt)
 
-		'''
-		elif self.decode_type == "nade":
-			chord_seq_pred = self.nade(pc_embedding_seq)
-		'''
+		print(f"head1_loss: {head1_loss}")
+		print(f"head2_loss: {head2_loss}")
+
+		head1_weight = 1
+		head2_weight = 1
+			
+		return head1_weight * head1_loss + head2_weight * head2_loss
 
 
 
@@ -455,52 +497,76 @@ class Decoder(nn.Module):
 
 # Wrapper for the complete model
 class ModelComplete(nn.Module):
-	def __init__(self, batch_size, sample_size, segment_max_len, num_label, note_transform_type, chord_transform_type, decode_type, device):
+	def __init__(self, batch_size, sample_size, segment_max_len, num_label, note_transform_type, chord_transform_type, decode_type, label_type, embedding_size, device):
 		super(ModelComplete, self).__init__()
 
 		self.batch_size = batch_size
 		self.decode_type = decode_type
+		self.label_type = label_type
+		self.embedding_size = embedding_size
 		self.device = device
 		
 		self.num_pc = 13
 		
 		# Initialize the note context transform module
-		self.note_context_transform = NoteContextTransform(self.num_pc, note_transform_type)
-		self.decoder = Decoder(decode_type, batch_size, sample_size, num_label, self.num_pc, segment_max_len, self.device, chord_transform_type)
+		self.note_context_transform = NoteContextTransform(self.num_pc, self.embedding_size, note_transform_type)
+		self.decoder = Decoder(self.decode_type, self.label_type, batch_size, sample_size, num_label, self.num_pc, segment_max_len, self.device, chord_transform_type, embedding_size)
+	
+	def get_loss(self, batch):
+		return self.forward(batch)
 
 	def forward(self, batch):
 		self.decoder.segment_score.chordal_pc_vector.detach_()
 		
 		pc_dist_seq = batch["pc_dist_seq"]
 		chord_seq = batch["chord_seq"]
+		root_seq = batch["root_seq"]
+		quality_seq = batch["quality_seq"]
+		key_seq = batch["key_seq"]
+		rn_seq = batch["rn_seq"]
 		pc_dist_seq = pc_dist_seq.to(self.device)
 		chord_seq = chord_seq.to(self.device)
-
+		root_seq = root_seq.to(self.device)
+		quality_seq = quality_seq.to(self.device)
+		key_seq = key_seq.to(self.device)
+		rn_seq = rn_seq.to(self.device)
 		'''
 		song_idx = batch["song_idx"]
 		sample_idx_in_song = batch["sample_idx_in_song"]
-
-
-		sample_idx = 1
+		qn_offset = batch["qn_offset"]
+		sample_idx = 3
 		sample_idx_in_song_cur = sample_idx_in_song[sample_idx]
 		print(f"song index: {song_idx[sample_idx]}")
 
-		qn_offset = 0
-
 		sample_size = 48
 		fpqn = 4
-		qnps = sample_size/fpqn
+		qnps = sample_size / fpqn
 
-		start_qn = qn_offset + qnps * sample_idx_in_song_cur
+		start_qn = qnps * sample_idx_in_song_cur
+		end_qn = start_qn + qnps - 1
 
 		print(f"start_qn: {start_qn}")
+		print(f"end_qn: {end_qn}")
 		print(chord_seq[sample_idx])
-		print(chord.index2symbol(1))
-		'''
 
+		print(pc_dist_seq[sample_idx, 0 : 1, :])
+		'''
+		
 		pc_embedding_seq = self.note_context_transform(pc_dist_seq)
 
-		return self.decoder.compute_loss(pc_embedding_seq, chord_seq)
+		self.decoder.pc_embedding_seq = pc_embedding_seq
+		
+		if self.decode_type == "softmax":
+			if self.label_type == "root_quality":
+				root_seq_one_hot = F.one_hot(root_seq.long(), num_classes=core.num_pc).float()
+				quality_seq_one_hot = F.one_hot(quality_seq.long(), num_classes=core.num_quality).float()
+				return self.decoder.compute_loss_cross_entropy(root_seq_one_hot, quality_seq_one_hot)
+			if self.label_type == "key_rn":
+				key_seq_one_hot = F.one_hot(key_seq.long(), num_classes=key.num_key).float()
+				rn_seq_one_hot = F.one_hot(rn_seq.long(), num_classes=rn.num_rn).float()
+				return self.decoder.compute_loss_cross_entropy(key_seq_one_hot, rn_seq_one_hot)
+		if self.decode_type == "semi_crf":
+			return self.decoder.compute_loss_semi_crf(chord_seq, key_seq, rn_seq)
 
 
 
