@@ -2,68 +2,108 @@ from ..utils import core
 
 # Number of modes used in the model
 num_mode = 2
-num_root = 12
-# Dictionary from mode to mode index
-mode2mode_index = {
-	"maj" : 0,
-	"min" : 1
-}
+mode_candidates = ["maj", "min"]
 
-# Dictionary from mode index to mode
-mode_index2mode = {
-	0 : "maj",
-	1 : "min"
-}
+num_single_accidental = 3
+single_accidental_candidates = ["b", "natural", "#"]
+
+# Number of different pitch spellings for key tonics
+num_tonic_ps = core.num_natural_ps * num_single_accidental
+num_key = num_tonic_ps * num_mode
+
+tonic_ps_candidates = [
+    "Cb",
+    "C",
+    "C#",
+    "Db",
+    "D",
+    "D#",
+    "Eb",
+    "E",
+    "E#",
+    "Fb",
+    "F",
+    "F#",
+    "Gb",
+    "G",
+    "G#",
+    "Ab",
+    "A",
+    "A#",
+    "Bb",
+    "B",
+    "B#",
+]
 
 class Key:
 
 	def __init__(self, *args, **kwargs):
+
+		self.key_index = None
+		self.key_symbol = None
 		arg_keys = list(kwargs.keys()) 
-		if arg_keys == ["root_pn", "mode"]:
-			self.root_pn = kwargs["root_pn"]
-			self.root_pc = core.pn2pc(self.root_pn)
+		if arg_keys == ["tonic_ps", "mode"]:
+			self.tonic_ps = kwargs["tonic_ps"]
+			self.tonic_index = tonic_ps2index(self.tonic_ps)
 			self.mode = kwargs["mode"]
-			self.mode_index = mode2mode_index[self.mode]
-		elif arg_keys == ["symbol"]:
-			self.root_pn, self.mode = parse_symbol(kwargs["symbol"])
-			self.root_pc = core.pn2pc(self.root_pn)
-			self.mode_index = mode2mode_index[self.mode]
-		elif arg_keys == ["index"]:
-			self.root_pc, self.mode_index = parse_index(kwargs['index'])
-			self.root_pn = core.pc2pn(self.root_pc)
-			self.mode = mode_index2mode[self.mode_index]
+			self.mode_index = mode_candidates.index(self.mode)
+		elif arg_keys == ["key_symbol"]:
+			self.key_symbol = kwargs["key_symbol"]
+			self.tonic_ps, self.mode = parse_key_symbol(self.key_symbol)
+			self.tonic_index = tonic_ps2index(self.tonic_ps)
+			self.mode_index = mode_candidates.index(self.mode)
+		elif arg_keys == ["key_index"]:
+			self.key_index = kwargs["key_index"]
+			self.tonic_index, self.mode_index = parse_key_index(self.key_index)
+			self.tonic_ps = tonic_index2ps(self.tonic_index)
+			self.mode = mode_candidates[self.mode_index]
+
+		if not self.key_symbol:
+			self.key_symbol = self.get_symbol()
+		if not self.key_index:
+			self.key_index = self.get_index()
+
 
 	def __repr__(self):
-		return f"Key(root = {self.root_pn}, mode = {self.mode})"
+		return f"Key(root = {self.tonic_ps}, mode = {self.mode})"
 	
 	def __str__(self):
 		return self.get_symbol()
 	
 	def get_symbol(self):
-		return f"{self.root_pn}_{self.mode}"
+		return f"{self.tonic_ps}_{self.mode}"
 
 	def get_index(self):
-		return num_mode * self.root_pc + self.mode_index
+		return num_mode * self.tonic_index + self.mode_index
 	
-def parse_symbol(symbol):
-	return symbol.split("_")
+def parse_key_symbol(key_symbol):
+	tonic_ps, mode = key_symbol.split("_")
+	return tonic_ps, mode
 
-def parse_index(index):
-	mode_index = index % num_mode
-	root_pc = int((index - mode_index) / num_mode)
-	return root_pc, mode_index
+def parse_key_index(key_index):
+	mode_index = key_index % num_mode
+	tonic_index = int((index - mode_index) / num_mode)
+	return tonic_index, mode_index
 
+def key_symbol2index(key_symbol):
+	tonic_ps, mode = parse_symbol(symbol)
+	tonic_index = tonic_ps2index(root_pn)
+	mode_index = mode_candidates.index(mode)
+	return num_mode * tonic_index + mode_index
 
-def symbol2index(symbol):
-	root_pn, mode = parse_symbol(symbol)
-	root_pc = core.pn2pc(root_pn)
-	mode_index = mode2mode_index[mode]
-	return num_mode * root_pc + mode_index
-
-def index2symbol(index):
-	root_pc, mode_index = parse_index(index)
-	root_pn = core.pc2pn(root_pc)
-	mode = mode_index2mode[mode_index]
+def key_index2symbol(key_index):
+	tonic_index, mode_index = parse_index(index)
+	tonic_ps = tonic_index2ps(root_pc)
+	mode = mode_candidates[mode_index]
 	return f"{root_pn}_{mode}"
+
+def tonic_ps2index(tonic_ps):
+	natural_ps, accidental = core.parse_ps(tonic_ps)
+	return core.natural_ps_candidates.index(natural_ps) * num_single_accidental + single_accidental_candidates.index(accidental)
+
+def tonic_index2ps(tonic_index):
+	single_accidental_index = tonic_index % num_single_accidental
+	natural_ps_index = int((tonic_index - single_accidental_index) / num_single_accidental)
+	return core.natural_ps_candidates[natural_ps_index] + single_accidental_candidates[single_accidental_index]
 
 

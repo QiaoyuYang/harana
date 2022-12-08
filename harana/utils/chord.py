@@ -94,8 +94,8 @@ class Chord:
 
 # Get the pitch classes of the chordal notes of a chord
 def chord_index2chordal_pc(chord_index):
-	root_pc, quality_index = parse_index(index)
-	quality = harmony.quality_candidates[quality_index]
+	root_pc, quality_index = parse_chord_index(chord_index)
+	quality = core.quality_candidates[quality_index]
 	return get_chordal_pc(root_pc, quality)
 
 def get_chordal_pc(root_pc, quality):

@@ -55,33 +55,6 @@ num_quality = 10
 # Candidate values for the quality
 quality_candidates = ['maj', 'min', 'aug', 'dim', 'maj7', 'min7', 'dom7', 'hdi7', 'dim7', 'aug6']
 
-# Dictionary from degree to pitch class distance from the root
-degree2pc_add_maj = {
-	"1" : 0,
-	"-2" : 1,
-	"2" : 2,
-	"3" : 4,
-	"4" : 5,
-	"+4" : 6,
-	"5" : 7,
-	"6" : 9,
-	"-7" : 10,
-	"7" : 11
-}
-
-degree2pc_add_min = {
-	"1" : 0,
-	"-2" : 1,
-	"2" : 2,
-	"3" : 3,
-	"4" : 5,
-	"+4" : 6,
-	"5" : 7,
-	"6" : 8,
-	"-7" : 10,
-	"7" : 11
-}
-
 class Note:
 
 	def __init__(self, midi_num, duration, onset, offset):
@@ -132,21 +105,6 @@ def ps_index2ps(ps_index):
 	accidental_index = ps_index % num_accidental
 	natural_ps_index = int((ps_index - accidental_index) / num_accidental)
 	return natural_ps_candidates[natural_ps_index] + accidental_candidates[accidental_index]
-
-def degree2pc_add(degree, mode):
-	
-	primary_degree, secondary_degree = parse_degree(degree)
-	
-	if mode == "maj":
-		primary_degree_pc_add = degree2pc_add_maj[primary_degree]	
-		secondary_degree_pc_add = degree2pc_add_maj[secondary_degree]
-	
-	if mode == "min":
-		primary_degree_pc_add = degree2pc_add_min[primary_degree]
-		secondary_degree_pc_add = degree2pc_add_min[secondary_degree]
-
-	return (primary_degree_pc_add + secondary_degree_pc_add) % core.num_pc
-
 
 
 
