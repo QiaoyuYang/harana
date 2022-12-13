@@ -4,50 +4,44 @@
 # Number of different pitch classes
 num_pc = 12
 
-# Number of different pitch spellings
-num_natural_ps = 7
-natural_ps_candidates = ["C", "D", "E", "F", "G", "A", "B"]
-# Dictionary from natural pitch spelling to pitch class
-natural_ps2pc = {
-	'C' : 0,
-	'D' : 2,
-	'E' : 4,
-	'F' : 5,
-	'G' : 7,
-	'A' : 9,
-	'B' : 11
+# Dictionary from pitch class to one possible pitch spelling
+# There could be multiple options for each pitch class. We choose a commonly used one.
+pc2ps_dict = {
+	0 : "C",
+	1 : "C#",
+	2 : "D",
+	3 : "Eb",
+	4 : "E",
+	5 : "F",
+	6 : "F#",
+	7 : "G",
+	8 : "Ab",
+	9 : "A",
+	10 : "Bb",
+	11 : "B"
 }
 
-num_accidental = 5
-accidental_candidates = ["bb", "b", "natural", "#", "##"]
-
-# Dictionary from accidental to pc add
-accidental2pc_add = {
-	"bb" : -2,
-	"b" : -1,
-	"natural" : 0,
-	"#" : 1,
-	"##" : 2
-
-}
-
-num_ps = num_natural_ps * num_accidental
-
-
-# Dictionary from pitch class to list of possible pitch spelling
-pc2ps = {
-	0 : ["B#", "C", "Dbb"],
-	1 : ["B##", "C#", "Db"],
-	2 : ["C##", "D", "Ebb"],
-	3 : ["D#", "Eb", "Fbb"],
-	4 : ["D##", "E", "Fb"],
-	5 : ["E#", "F", "Gbb"],
-	6 : ["E##", "F#", "Gb"],
-	7 : ["F##", "G", "Abb"],
-	8 : ["G#", "Ab"],
-	9 : ["G##", "A", "Bbb"],
-	10 : ["A#", "Bb", "Cbb"],
-	11 : ["A##", "B", "Cb"]
+ps2pc_dict = {
+	"B#" : 0,
+	"C" : 0,
+	"C#" : 1,
+	"Db" : 1,
+	"D" : 2,
+	"D#" : 3,
+	"Eb" : 3,
+	"E" : 4,
+	"Fb" : 4,
+	"E#" : 5,
+	"F" : 5,
+	"F#" : 6,
+	"Gb" : 6,
+	"G" : 7,
+	"G#" : 8,
+	"Ab" : 8,
+	"A" : 9,
+	"A#" : 10,
+	"Bb" : 10,
+	"B" : 11
 }
 
 num_quality = 10
@@ -74,37 +68,15 @@ def midi_num2piano_pitch(midi_num):
 	return midi_num - 20
 
 def piano_pitch2pc(piano_pitch):
-	return (piano_pitch - 4)%12
+	return (piano_pitch - 4) % 12
 
 def midi_num2pc(midi_num):
-	return piano_pitch2pc(midi_num2piano_pitch(midi_num))
+	return (midi_num - 24) % 12
 
-def pc2ps_list(pc):
-	return pc2ps[pc]
+def pc2ps(pc):
+	return pc2ps_dict[pc]
 
 def ps2pc(ps):
-	natural_ps, accidental = parse_ps(ps)
-	return (natural_ps2pc[natural_ps] + accidental2pc_add[accidental]) % num_pc
-
-def parse_ps(ps):
-	if len(ps) > 1:
-		natural_ps = ps[0]
-		accidental = ps[1:]
-		return natural_ps, accidental
-	else:
-		natural_ps = ps
-		accidental = "natural"
-		return natural_ps, accidental
-
-
-def ps2ps_index(ps):
-	natural_ps, accidental = parse_ps(ps)
-	return natural_ps_candidates.index(natural_ps) * num_accidental + accidental_candidates.index(accidental)
-
-def ps_index2ps(ps_index):
-	accidental_index = ps_index % num_accidental
-	natural_ps_index = int((ps_index - accidental_index) / num_accidental)
-	return natural_ps_candidates[natural_ps_index] + accidental_candidates[accidental_index]
-
+	return ps2pc_dict[ps]
 
 

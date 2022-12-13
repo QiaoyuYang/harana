@@ -30,6 +30,8 @@ degree2pc_add_min = {
 	"7" : 11
 }
 
+num_inversion = 4
+
 class Harmony:
 
 	def __init__(self, local_key, degree, quality, inversion, onset, offset):

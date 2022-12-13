@@ -54,11 +54,11 @@ class Chord:
 		if "chord_index" in arg_keys:
 			self.chord_index = kwargs["chord_index"]
 			self.root_pc, self.quality_index = parse_index(self.chord_index)
-			self.root_ps = core.pc2ps_list(self.root_pc)[1]
+			self.root_ps = core.pc2ps(self.root_pc)
 			self.quality = core.quality_candidates[quality_index]
 		if "root_pc" in arg_keys and "quality" in arg_keys:
 			self.root_pc = kwargs["root_pc"]
-			self.root_ps = core.pc2ps_list(self.root_pc)[1]
+			self.root_ps = core.pc2ps(self.root_pc)
 			self.quality = kwargs["quality"]
 			self.quality_index = core.quality_candidates.index(self.quality)
 		if "onset" in arg_keys and "offset" in arg_keys:
@@ -66,7 +66,7 @@ class Chord:
 			self.offset = kwargs["offset"]
 			self.duration = self.offset - self.onset + 1
 		if "inversion" in arg_keys:
-			self.inversion = kwargs["inversion"]
+			self.inversion = int(kwargs["inversion"])
 
 		self.chordal_pc = get_chordal_pc(self.root_pc, self.quality)
 		self.bass_pc = get_bass_pc(self.chordal_pc, self.inversion)
@@ -116,13 +116,13 @@ def parse_chord_index(chord_index):
 def chord_symbol2index(chord_symbol):
 	root_ps, quality = parse_chord_symbol(chord_symbol)
 	root_pc = core.ps2pc(root_ps)
-	quality_index = harmony.quality_candidates.index(quality)
+	quality_index = core.quality_candidates.index(quality)
 	return core.num_quality * root_pc + quality_index
 
 # Convert the index of chord to its symbol
 def chord_index2symbol(chord_index):
 	root_pc, quality_index = parse_index(chord_index)
-	root_ps = core.pc2ps(root_pc)[1]
+	root_ps = core.pc2ps(root_pc)
 	quality = core.quality_candidates[quality_index]
 	return f"{root_ps}_{quality}"
 

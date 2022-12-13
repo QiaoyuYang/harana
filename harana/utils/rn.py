@@ -105,6 +105,9 @@ class RomanNumeral:
 		if "inversion" in arg_keys:
 			self.inversion = int(kwargs["inversion"])
 
+		self.primary_degree_index = primary_degree_candidates.index(self.primary_degree)
+		self.secondary_degree_index = secondary_degree_candidates.index(self.secondary_degree)
+
 		chordal_mode = quality2chordal_mode[self.quality]
 		if self.secondary_degree == "1":
 			if chordal_mode == "maj":
