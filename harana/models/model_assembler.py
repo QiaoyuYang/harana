@@ -70,7 +70,7 @@ class CNN1d(nn.Module):
 		in_planes = 1
 		in_planes[k] = out_planes[k - 1]
 	'''
-	def __init__(self, num_pc, in_planes=[1, 1, 1], out_planes=[1, 1, 1], kernel_sizes=[3, 3, 3, 3], drop_rate=0.0):
+	def __init__(self, num_pc, in_planes=[1, 1, 1], out_planes=[1, 1, 1], kernel_sizes=[3, 3, 3, 3], drop_rate=0.6):
 		super(CNN1d, self).__init__()
 		self.num_pc = num_pc
 		self.conv1 = TransitionBlock(num_pc, in_planes=in_planes[0], out_planes=out_planes[0], kernel_size=kernel_sizes[0], drop_rate=drop_rate)
@@ -116,7 +116,7 @@ class DenseGRU(nn.Module):
 	The parameter values follow the setup in Micchi et al, 2021
 	'''
 	def __init__(self, num_pc, embedding_size, block_depths=[3, 2, 2], growth_rates=[10, 4, 4], kernel_sizes=[7, 3, 3],
-                 bottleneck=True, drop_rate=0.0, gru_hidden_size=178):
+                 bottleneck=True, drop_rate=0.6, gru_hidden_size=178):
 		super(DenseGRU, self).__init__()
 
 		# Initialize the DenseNet module
@@ -127,9 +127,11 @@ class DenseGRU(nn.Module):
 		
 		# Initialize the GRU layer
 		self.gru = nn.GRU(input_size=num_feature_after_densenet, hidden_size=gru_hidden_size, batch_first=True)
-
+		self.gru_bn = nn.BatchNorm1d(num_feature_after_densenet)
+		
 		# Project the embedding size of each frame back to the number of pitch class
-		self.bottleneck = nn.Linear(gru_hidden_size, embedding_size)
+		self.fc = nn.Linear(gru_hidden_size, embedding_size)
+		self.fc_bn = nn.BatchNorm1d(gru_hidden_size)
 
 	def forward(self, x):
 		
@@ -149,10 +151,22 @@ class DenseGRU(nn.Module):
 		out = out.flatten(start_dim=2)
 		# out.shape: (batch_size, sample_size, num_feature_each_frame)
 
+		out = out.permute(0, 2, 1)
+		# out.shape: (batch_size, num_feature_each_frame, sample_size)
+		out = self.gru_bn(out)
+		out = out.permute(0, 2, 1)
+		# out.shape: (batch_size, sample_size, num_feature_each_frame)
+
 		out, _ = self.gru(out)
 		# out.shape: (batch_size, sample_size, gru_hidden_size)
 
-		out = self.bottleneck(out)
+		out = out.permute(0, 2, 1)
+		# out.shape: (batch_size, gru_hidden_size, sample_size)
+		out = self.fc_bn(out)
+		out = out.permute(0, 2, 1)
+		# out.shape: (batch_size, sample_size, gru_hidden_size)
+
+		out = self.fc(out)
 		# out.shape: (batch_size, sample_size, embedding_size)
 
 		return out
@@ -209,21 +223,18 @@ class ChordalPCWeightTransform(nn.Module):
 			# Get the root pc of the chord
 			root_pc, _ = chord.parse_chord_index(label_idx)
 
-			# Slice the 12 actual pitch classes from the vector
-			chordal_pc_vector_cur_12 = chordal_pc_vector[:, label_idx, :self.num_pc - 1]
+			# Get the current chordal pc vector
+			chordal_pc_vector_cur = chordal_pc_vector[:, label_idx, :]
 
 			# If the target pc vector has the root pc at the first entry
 			if mode == "root_first":
-				chordal_pc_vector_permuted_cur_12 = chordal_pc_vector_cur_12.roll(self.num_pc - 1 - root_pc, dims=1)
+				chordal_pc_vector_permuted_cur = chordal_pc_vector_cur.roll(self.num_pc - 1 - root_pc, dims=1)
 			# If the target pc vector has the original order
 			elif mode == "original":
-				chordal_pc_vector_permuted_cur_12 = chordal_pc_vector_cur_12.roll(root_pc, dims=1)
-			
-			# Concatenate the no-pitch class back to the vector
-			chordal_pc_vector_permuted_cur_13 = torch.cat([chordal_pc_vector_permuted_cur_12, chordal_pc_vector[:, label_idx, -1].unsqueeze(-1)], dim=1)
+				chordal_pc_vector_permuted_cur = chordal_pc_vector_cur.roll(root_pc, dims=1)
 			
 			# Stach each permuted chordal pc vector at the num_label dimension
-			chordal_pc_vector_permuted = torch.cat([chordal_pc_vector_permuted, chordal_pc_vector_permuted_cur_13[:, None, :]], dim=1)
+			chordal_pc_vector_permuted = torch.cat([chordal_pc_vector_permuted, chordal_pc_vector_permuted_cur[:, None, :]], dim=1)
 		
 		return chordal_pc_vector_permuted
 	
@@ -392,6 +403,12 @@ class ScaledDotProductAttention(nn.Module):
 #   Decoder   #
 ###############
 
+label_type2categories = {
+	"root_quality" : ["root", "quality"],
+	"key_rn" : ["key", "rn"],
+	"all" : ["key_tonic", "key_mode", "pri_deg", "sec_deg", "root", "quality", "inversion"]
+}
+
 class SoftmaxDecoder(nn.Module):
 
 	def __init__(self, embedding_size, label_type):
@@ -401,21 +418,50 @@ class SoftmaxDecoder(nn.Module):
 		
 		if self.label_type == "root_quality":
 			self.root_head = nn.Linear(embedding_size, core.num_pc)
+			self.root_head_bn = nn.BatchNorm1d(embedding_size)
 			self.quality_head = nn.Linear(embedding_size, core.num_quality)
+			self.quality_head_bn = nn.BatchNorm1d(embedding_size)
 		if self.label_type == "key_rn":
 			self.key_head = nn.Linear(embedding_size, key.num_key)
+			self.key_head_bn = nn.BatchNorm1d(embedding_size)
 			self.rn_head = nn.Linear(embedding_size, rn.num_rn)
+			self.rn_head_bn = nn.BatchNorm1d(embedding_size)
+		if self.label_type == "all":
+			self.key_tonic_head = nn.Linear(embedding_size, key.num_tonic)
+			self.key_tonic_head_bn = nn.BatchNorm1d(embedding_size)
+			self.key_mode_head = nn.Linear(embedding_size, key.num_mode)
+			self.key_mode_head_bn = nn.BatchNorm1d(embedding_size)
+			self.pri_deg_head = nn.Linear(embedding_size, rn.num_primary_degree)
+			self.pri_deg_head_bn = nn.BatchNorm1d(embedding_size)
+			self.sec_deg_head = nn.Linear(embedding_size, rn.num_secondary_degree)
+			self.sec_deg_head_bn = nn.BatchNorm1d(embedding_size)
+			self.root_head = nn.Linear(embedding_size, core.num_pc)
+			self.root_head_bn = nn.BatchNorm1d(embedding_size)
+			self.quality_head = nn.Linear(embedding_size, core.num_quality)
+			self.quality_head_bn = nn.BatchNorm1d(embedding_size)
+			self.inversion_head = nn.Linear(embedding_size, harmony.num_inversion)
+			self.inversion_head_bn = nn.BatchNorm1d(embedding_size)
 		self.softmax = nn.Softmax(dim=2)
 
-	def forward(self, pc_embedding_seq):
+	def forward(self, pc_embedding):
+		decode_prob = {}
+		
 		if self.label_type == "root_quality":
-			root_prob_seq = self.softmax(self.root_head(pc_embedding_seq))
-			quality_prob_seq = self.softmax(self.quality_head(pc_embedding_seq))
-			return root_prob_seq, quality_prob_seq
+			decode_prob["root"] = self.softmax(self.root_head(pc_embedding))
+			decode_prob["quality"] = self.softmax(self.quality_head(pc_embedding))
 		if self.label_type == "key_rn":
-			key_prob_seq = self.softmax(self.key_head(pc_embedding_seq))
-			rn_prob_seq = self.softmax(self.rn_head(pc_embedding_seq))
-			return key_prob_seq, rn_prob_seq
+			decode_prob["key"] = self.softmax(self.key_head(pc_embedding))
+			decode_prob["rn"] = self.softmax(self.rn_head(pc_embedding))
+		if self.label_type == "all":
+			decode_prob["key_tonic"] = self.softmax(self.key_tonic_head(self.key_tonic_head_bn(pc_embedding.permute(0, 2, 1)).permute(0, 2, 1)))
+			decode_prob["key_mode"] = self.softmax(self.key_mode_head(self.key_mode_head_bn(pc_embedding.permute(0, 2, 1)).permute(0, 2, 1)))
+			decode_prob["pri_deg"] = self.softmax(self.pri_deg_head(self.pri_deg_head_bn(pc_embedding.permute(0, 2, 1)).permute(0, 2, 1)))
+			decode_prob["sec_deg"] = self.softmax(self.sec_deg_head(self.sec_deg_head_bn(pc_embedding.permute(0, 2, 1)).permute(0, 2, 1)))
+			decode_prob["root"]= self.softmax(self.root_head(self.root_head_bn(pc_embedding.permute(0, 2, 1)).permute(0, 2, 1)))
+			decode_prob["quality"] = self.softmax(self.quality_head(self.quality_head_bn(pc_embedding.permute(0, 2, 1)).permute(0, 2, 1)))
+			decode_prob["inversion"] = self.softmax(self.inversion_head(self.inversion_head_bn(pc_embedding.permute(0, 2, 1)).permute(0, 2, 1)))
+		
+		return decode_prob
 
 # Wrapper for the decoder
 class Decoder(nn.Module):
@@ -427,7 +473,8 @@ class Decoder(nn.Module):
 		self.label_type = label_type
 		self.device = device
 
-		self.pc_embedding_seq = torch.zeros(batch_size, sample_size, embedding_size)
+		self.pc_embedding = torch.zeros(batch_size, sample_size, embedding_size)
+		self.pc_embedding = self.pc_embedding.to(self.device)
 
 		self.segment_score = SegmentScore(self.batch_size, sample_size, num_label, num_pc, embedding_size, chord_transform_type, self.device)
 		transition_importance = 0.001 / (sample_size - 1)
@@ -441,28 +488,25 @@ class Decoder(nn.Module):
 
 	def decode(self):
 		
+		decode_result = {}
 		if self.decode_type == "semi_crf":
 			return self.semicrf.decode()
 
 		if self.decode_type == "softmax":
-			if self.label_type == "root_quality":
-				root_prob_seq, quality_prob_seq = self.softmax_decoder(self.pc_embedding_seq)
-				root_seq_pred = root_prob_seq.argmax(dim=2)
-				quality_seq_pred = quality_prob_seq.argmax(dim=2)
-				return [root_seq_pred, quality_seq_pred]
-			if self.label_type == "key_rn":
-				key_prob_seq, rn_prob_seq = self.softmax_decoder(self.pc_embedding_seq)
-				key_seq_pred = key_prob_seq.argmax(dim=2)
-				rn_seq_pred = rn_prob_seq.argmax(dim=2)
-				return [key_seq_pred, rn_seq_pred]
+			decode_prob = self.softmax_decoder(self.pc_embedding)
+			
+			for category in label_type2categories[self.label_type]:
+				decode_result[category] = decode_prob[category].argmax(dim=2)
+			
+			return decode_result
 
-	def compute_loss_semi_crf(self, chord_seq, key_seq, rn_seq):
+	def compute_loss_semi_crf(self, chord_gt, key_gt, rn_gt):
 
 		print("Computing segment score")
-		self.semicrf.segment_score = self.segment_score(self.pc_embedding_seq)
+		self.semicrf.segment_score = self.segment_score(self.pc_embedding)
 			
 		print("Computing path score")
-		path_score = self.semicrf.compute_path_score(chord_seq)
+		path_score = self.semicrf.compute_path_score(chord_gt)
 
 		transition_weight_L2_loss = self.semicrf.transitions.flatten().square().sum()
 			
@@ -472,21 +516,21 @@ class Decoder(nn.Module):
 		nll = - torch.sum(path_score - log_z) / self.batch_size
 			
 		return nll + transition_weight_L2_loss
-	
-	def compute_loss_cross_entropy(self, head1_seq_gt, head2_seq_gt):
-		
-		head1_seq_pred, head2_seq_pred = self.softmax_decoder(self.pc_embedding_seq)
-			
-		head1_loss = self.cross_entropy_loss(head1_seq_pred, head1_seq_gt)
-		head2_loss = self.cross_entropy_loss(head2_seq_pred, head2_seq_gt)
 
-		print(f"head1_loss: {head1_loss}")
-		print(f"head2_loss: {head2_loss}")
+	def compute_loss_cross_entropy(self, root_gt, quality_gt, key_tonic_gt, key_mode_gt, pri_deg_gt, sec_deg_gt, inversion_gt):
 
-		head1_weight = 1
-		head2_weight = 1
+		decode_prob = self.softmax_decoder(self.pc_embedding)
+
+		root_loss = self.cross_entropy_loss(decode_prob["root"].permute(0, 2, 1), root_gt.long())
+		quality_loss = self.cross_entropy_loss(decode_prob["quality"].permute(0, 2, 1), quality_gt.long())
+		key_tonic_loss = self.cross_entropy_loss(decode_prob["key_tonic"].permute(0, 2, 1), key_tonic_gt.long())
+		key_mode_loss = self.cross_entropy_loss(decode_prob["key_mode"].permute(0, 2, 1), key_mode_gt.long())
+		pri_deg_loss = self.cross_entropy_loss(decode_prob["pri_deg"].permute(0, 2, 1), pri_deg_gt.long())
+		sec_deg_loss = self.cross_entropy_loss(decode_prob["sec_deg"].permute(0, 2, 1), sec_deg_gt.long())
+		inversion_loss = self.cross_entropy_loss(decode_prob["inversion"].permute(0, 2, 1), inversion_gt.long())
 			
-		return head1_weight * head1_loss + head2_weight * head2_loss
+		return root_loss + quality_loss + key_tonic_loss + key_mode_loss + pri_deg_loss + sec_deg_loss + inversion_loss
+
 
 
 
@@ -506,7 +550,7 @@ class ModelComplete(nn.Module):
 		self.embedding_size = embedding_size
 		self.device = device
 		
-		self.num_pc = 13
+		self.num_pc = 12
 		
 		# Initialize the note context transform module
 		self.note_context_transform = NoteContextTransform(self.num_pc, self.embedding_size, note_transform_type)
@@ -518,18 +562,33 @@ class ModelComplete(nn.Module):
 	def forward(self, batch):
 		self.decoder.segment_score.chordal_pc_vector.detach_()
 		
-		pc_dist_seq = batch["pc_dist_seq"]
-		chord_seq = batch["chord_seq"]
-		root_seq = batch["root_seq"]
-		quality_seq = batch["quality_seq"]
-		key_seq = batch["key_seq"]
-		rn_seq = batch["rn_seq"]
-		pc_dist_seq = pc_dist_seq.to(self.device)
-		chord_seq = chord_seq.to(self.device)
-		root_seq = root_seq.to(self.device)
-		quality_seq = quality_seq.to(self.device)
-		key_seq = key_seq.to(self.device)
-		rn_seq = rn_seq.to(self.device)
+		pc_exist = batch["pc_exist"]
+		pc_dur = batch["pc_dur"]
+		chord_gt = batch["chord"]
+		root_gt = batch["root"]
+		quality_gt = batch["quality"]
+		key_gt = batch["key"]
+		key_tonic_gt = batch["key_tonic"]
+		key_mode_gt = batch["key_mode"]
+		rn_gt = batch["rn"]
+		pri_deg_gt = batch["pri_deg"]
+		sec_deg_gt = batch["sec_deg"]
+		inversion_gt = batch["inversion"]
+
+		pc_exist = pc_exist.to(self.device)
+		pc_dur = pc_dur.to(self.device)
+		chord_gt = chord_gt.to(self.device)
+		root_gt = root_gt.to(self.device)
+		quality_gt = quality_gt.to(self.device)
+		key_gt = key_gt.to(self.device)
+		key_tonic_gt = key_tonic_gt.to(self.device)
+		key_mode_gt = key_mode_gt.to(self.device)
+		rn_gt = rn_gt.to(self.device)
+		pri_deg_gt = pri_deg_gt.to(self.device)
+		sec_deg_gt = sec_deg_gt.to(self.device)
+		inversion_gt = inversion_gt.to(self.device)
+
+
 		'''
 		song_idx = batch["song_idx"]
 		sample_idx_in_song = batch["sample_idx_in_song"]
@@ -547,26 +606,19 @@ class ModelComplete(nn.Module):
 
 		print(f"start_qn: {start_qn}")
 		print(f"end_qn: {end_qn}")
-		print(chord_seq[sample_idx])
+		print(f"chord_frame_seq: {chord_frame_seq[sample_idx]}")
 
-		print(pc_dist_seq[sample_idx, 0 : 1, :])
+		print(f"pc_exist_frame 1: {pc_exist_frame_seq[sample_idx, 0, :]}")
+		print(f"pc_dur_frame 1: {pc_dur_frame_seq[sample_idx, 0, :]}")
 		'''
-		
-		pc_embedding_seq = self.note_context_transform(pc_dist_seq)
+		pc_embedding = self.note_context_transform(pc_exist)
 
-		self.decoder.pc_embedding_seq = pc_embedding_seq
+		self.decoder.pc_embedding = pc_embedding
 		
 		if self.decode_type == "softmax":
-			if self.label_type == "root_quality":
-				root_seq_one_hot = F.one_hot(root_seq.long(), num_classes=core.num_pc).float()
-				quality_seq_one_hot = F.one_hot(quality_seq.long(), num_classes=core.num_quality).float()
-				return self.decoder.compute_loss_cross_entropy(root_seq_one_hot, quality_seq_one_hot)
-			if self.label_type == "key_rn":
-				key_seq_one_hot = F.one_hot(key_seq.long(), num_classes=key.num_key).float()
-				rn_seq_one_hot = F.one_hot(rn_seq.long(), num_classes=rn.num_rn).float()
-				return self.decoder.compute_loss_cross_entropy(key_seq_one_hot, rn_seq_one_hot)
+				return self.decoder.compute_loss_cross_entropy(root_gt, quality_gt, key_tonic_gt, key_mode_gt, pri_deg_gt, sec_deg_gt, inversion_gt)
 		if self.decode_type == "semi_crf":
-			return self.decoder.compute_loss_semi_crf(chord_seq, key_seq, rn_seq)
+			return self.decoder.compute_loss_semi_crf(chord_gt, key_gt, rn_gt)
 
 
 

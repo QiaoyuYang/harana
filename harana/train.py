@@ -25,8 +25,8 @@ def main(args_in):
 
 	parser.add_argument('--dataset', help="name of the dataset, ('BPSFH')", default = "BPSFH", type=str)
 	
-	parser.add_argument('--batch_size', help="number of samples in each batch", default = 16, type=int)
-	parser.add_argument('--sample_size', help="number of frames in each sample", default = 8, type=int)
+	parser.add_argument('--batch_size', help="number of samples in each batch", default = 96, type=int)
+	parser.add_argument('--sample_size', help="number of frames in each sample", default = 48, type=int)
 	parser.add_argument('--segment_max_len', help="max number of frames in a segment", default = 8, type=int)
 	
 	parser.add_argument('--frame_type', help="type of the representation to encode the basic time unit, ('inter_onset', 'fixed_size')", default = "fixed_size", type=str)
@@ -35,12 +35,12 @@ def main(args_in):
 
 	parser.add_argument('--num_label', help="number of chord labels", default = 120, type=int)
 
-	parser.add_argument('--note_transform_type', help="type of the note transform, (none, cnn, dense_gru)", default = "none", type=str)
-	parser.add_argument('--chord_transform_type', help="type of the chord transform, (weight_vector, fc1, fc2)", default = "fc1", type=str)
-	parser.add_argument('--decode_type', help="type of the decoder, (softmax, nade, semi_crf)", default = "semi_crf", type=str)
-	parser.add_argument('--label_type', help="type of the chord label, (root_quality, key_rn)", default = "root_quality", type=str)
+	parser.add_argument('--note_transform_type', help="type of the note transform, (none, cnn, dense_gru)", default = "dense_gru", type=str)
+	parser.add_argument('--chord_transform_type', help="type of the chord transform, (weight_vector, fc1, fc2)", default = "weight_vector", type=str)
+	parser.add_argument('--decode_type', help="type of the decoder, (softmax, nade, semi_crf)", default = "softmax", type=str)
+	parser.add_argument('--label_type', help="type of the chord label, (root_quality, key_rn)", default = "all", type=str)
 
-	parser.add_argument('--embedding_size', help="dimension size of the embedding", default = "13", type=int)
+	parser.add_argument('--embedding_size', help="dimension size of the embedding", default = "64", type=int)
 
 	# Extract the information from the input arguments
 	args = parser.parse_args(args_in)
@@ -70,7 +70,7 @@ def main(args_in):
 	dataset_bpsfh = BPSFHDataset(dataset_root_dir, sample_size, frame_type, tpqn, fpqn)
 
 	# The proportion of the dataset that is used to train
-	train_proportion = 0.9
+	train_proportion = 0.8
 	train_size = round(len(dataset_bpsfh) * train_proportion)
 
 	# The rest is used for validation
@@ -87,9 +87,9 @@ def main(args_in):
 	# Initialize the model and the optimizer
 	model = ModelComplete(batch_size, sample_size, segment_max_len, num_label, note_transform_type, chord_transform_type, decode_type, label_type, embedding_size, device)
 	model.to(device)
-	optimizer = optim.Adam(model.parameters(), lr = 0.005)
+	optimizer = optim.Adam(model.parameters(), lr = 0.0001)
 
-	evaluator = eval_utils.Evaluator(decode_type, label_type)
+	evaluator = eval_utils.Evaluator(decode_type, label_type, batch_size, sample_size)
 
 
 
@@ -113,13 +113,13 @@ def main(args_in):
 	eval_epoch = False
 
 	# The training process consists of 100 epochs
-	for epoch in range(1,201):
+	for epoch in range(1,1001):
 		print(f"\n\n\nepoch: {epoch}")
 
 		evaluator.initialize()
 
 		# Run evaluation every 5 epochs
-		if epoch%5 == 1:
+		if epoch%5 == 0:
 			eval_epoch = True
 		
 
@@ -133,7 +133,7 @@ def main(args_in):
 			print(f"Memory used: {psutil.Process().memory_info().rss / (1024 * 1024)}MB")
 
 			# A batch is only used if it is a complete batch with the designated size
-			if train_batch['pc_dist_seq'].shape[0] != batch_size:
+			if train_batch['pc_exist'].shape[0] != batch_size:
 				continue
 			else:
 				num_train_batch += 1
@@ -143,11 +143,9 @@ def main(args_in):
 			optimizer.zero_grad()
 
 			print(f"\nTraining... epoch: {epoch}, batch: {batch_idx}")
+			
 			train_loss = model.get_loss(train_batch)
-
-
 			print(f"Training loss: {train_loss}")
-			#train_loss_all.append(train_loss.item())
 
 			#print(torch.cuda.memory_summary(device=None, abbreviated=False))
 
@@ -169,10 +167,7 @@ def main(args_in):
 					print("Evaluating on the training batch")
 
 					decoded_result_train = model.decoder.decode()
-					print(model.decoder.semicrf.segment_score[0])
-					print(model.decoder.semicrf.transitions)
-					print(decoded_result_train[0])
-					evaluator.update_train(train_batch, train_loss, decoded_result_train, decode_type, label_type, batch_size, sample_size)
+					evaluator.update_train(train_batch, train_loss, decoded_result_train)
 
 
 		##################
@@ -188,7 +183,7 @@ def main(args_in):
 			
 			num_validation_batch = 0
 			for batch_idx, validation_batch in enumerate(validation_loader):
-				if validation_batch['pc_dist_seq'].shape[0] != batch_size:
+				if validation_batch['pc_exist'].shape[0] != batch_size:
 					continue
 				else:
 					num_validation_batch += 1
@@ -198,8 +193,10 @@ def main(args_in):
 					print("Evaluating on the validation batch")
 					
 					validation_loss = model.get_loss(validation_batch)
+					print(f"Validation loss: {validation_loss}")
+
 					decoded_result_validation = model.decoder.decode()
-					evaluator.update_validation(validation_batch, validation_loss, decoded_result_validation, decode_type, label_type, batch_size, sample_size)
+					evaluator.update_validation(validation_batch, validation_loss, decoded_result_validation)
 			
 
 			####################################
@@ -207,7 +204,6 @@ def main(args_in):
 			####################################
 			evaluator.summarize_epoch(epoch, num_train_batch, num_validation_batch)
 			eval_epoch = False
-
 
 if __name__ == "__main__":
 	main(sys.argv[1:])
