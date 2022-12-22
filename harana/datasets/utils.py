@@ -38,8 +38,8 @@ class Note(object):
         """
 
         # Assume first key is A0 (midi pitch 21)
-        # TODO - should this begin at 0 or 1?
-        key_index = self.midi_pitch - 20
+        # TODO - don't need cast if we always add integers in the first place
+        key_index = int(self.midi_pitch - 21)
 
         return key_index
 
