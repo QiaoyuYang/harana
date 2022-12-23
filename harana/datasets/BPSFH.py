@@ -21,10 +21,6 @@ class BPSFH(Dataset):
     TODO
     """
 
-    # TODO - remove after verifying same output
-    #tensors_collapsed = torch.load('harana/datasets/sample_tensors_collapsed')
-    #tensors_uncollapsed = torch.load('harana/datasets/sample_tensors_uncollapsed')
-
     def __init__(self, base_dir=None, tracks=None, ticks_per_quarter=24,
                        frames_per_quarter=4, frames_per_sample=8, reset_data=False,
                        store_data=False, save_data=False, save_loc=None, seed=0):
@@ -43,7 +39,7 @@ class BPSFH(Dataset):
             self.download(self.base_dir)
 
         # Set the parameters related to ticks and frames
-        # TODO - will I actually need all of these?
+        # TODO - do/can all of these actually vary for this dataset? - if not make constants...
         self.ticks_per_quarter = ticks_per_quarter
         self.frames_per_quarter = frames_per_quarter
         self.frames_per_sample = frames_per_sample
@@ -96,19 +92,65 @@ class BPSFH(Dataset):
 
     def __getitem__(self, index):
         """
-        TODO
+        Retrieve the randomly sliced data associated with the selected index in Tensor format.
+
+        Parameters
+        ----------
+        index : int
+          Index of sampled track
+
+        Returns
+        ----------
+        data : dict
+          Dictionary containing the sliced ground-truth data for the sampled track
         """
 
-        # TODO
+        # Get the name of the track
+        track_id = self.tracks[index]
+
+        # Slice the track's ground-truth
+        data = self.get_track_data(track_id)
 
         return data
 
-    def get_track_data(self, track_id, sample_start=None, seq_length=None, snap_to_frame=True):
+    def get_track_data(self, track_id, frame_start=None, frames_per_sample=None, snap_to_measure=True):
         """
         TODO
         """
 
-        # TODO
+        if self.store_data:
+            # Copy the track's ground-truth data into a local dictionary
+            data = deepcopy(self.data[track_id])
+        else:
+            # Load the track's ground-truth
+            data = self.load(track_id)
+
+        # Check to see if a specific frame length was given
+        if frames_per_sample is None:
+            if self.frames_per_sample is not None:
+                # If not, use the default if available
+                frames_per_sample = self.frames_per_sample
+            else:
+                # Otherwise, assume full track is desired
+                return data
+
+        if frame_start is None:
+            # If a specific starting frame was not provided, sample one randomly
+            frame_start = self.rng.randint(0, data[KEY_PC_ACT].shape[-1] - frames_per_sample)
+
+        # Determine where the sample ends
+        frame_stop = frame_start + frames_per_sample
+
+        if snap_to_measure:
+            # TODO
+            print()
+
+        # Loop through the dictionary keys
+        for key in data.keys():
+            # Check if the dictionary entry is an array
+            if isinstance(data[key], np.ndarray):
+                # Slice along the final axis
+                data[key] = data[key][..., frame_start : frame_stop]
 
         return data
 
@@ -134,6 +176,8 @@ class BPSFH(Dataset):
         if self.save_data and os.path.exists(gt_path):
             # Load and unpack the saved data for the track
             data = dict(np.load(gt_path, allow_pickle=True))
+            # Unpack the track ID from the array
+            data[KEY_TRACK] = data[KEY_TRACK].item()
         else:
             # Initialize a new dictionary
             data = dict()
@@ -144,19 +188,12 @@ class BPSFH(Dataset):
             # Obtain a list of all chord changes which occur in the track
             chords = self.read_chords(track)
 
-            # TODO - compute all relevant matrices
-            #note_exist_seq = self.tensors_uncollapsed[0][track].cpu().detach().numpy().reshape(-1, 89).T
-            #note_dist_seq = self.tensors_uncollapsed[1][track].cpu().detach().numpy().reshape(-1, 89).T
-            #pc_exist_seq = self.tensors_uncollapsed[2][track].cpu().detach().numpy().reshape(-1, 13).T
-            #pc_dist_seq = self.tensors_uncollapsed[3][track].cpu().detach().numpy().reshape(-1, 13).T
-            #chord_seq = self.tensors_uncollapsed[4][track].cpu().detach().numpy()
-            #root_seq = self.tensors_uncollapsed[5][track].cpu().detach().numpy()
-            #quality_seq = self.tensors_uncollapsed[6][track].cpu().detach().numpy()
-            #key_seq = self.tensors_uncollapsed[7][track].cpu().detach().numpy()
-            #rn_seq = self.tensors_uncollapsed[8][track].cpu().detach().numpy()
+            # Make sure the notes are sorted before continuing
+            notes = sorted(notes, key=lambda x: x.onset)
 
-            # TODO - assumes sorted notes
             # Determine the offset in ticks before zero time
+            # TODO - should probably include this in ground-truth, and act
+            #        accordingly in self.get_track_data when snap_to_measure=True
             tick_offset = notes[0].onset
             # Determine the final tick of the last note
             tick_final = notes[-1].get_offset()
@@ -168,47 +205,59 @@ class BPSFH(Dataset):
             #num_frames = math.ceil((num_ticks - tick_offset) / self.ticks_per_frame)
             num_frames = math.ceil(tick_final / self.ticks_per_frame)
 
-            pitch_activity = np.zeros((88, num_frames))
+            # Initialize arrays to hold frame-level pitch activity and distribution
+            pitch_activity = np.zeros((NUM_KEYS, num_frames))
             pitch_distr = pitch_activity.copy()
 
             for note in notes:
                 #frame_onset = math.floor((note.onset - tick_offset) / self.ticks_per_frame)
-                frame_onset = math.floor(note.onset / self.ticks_per_frame)
                 #frame_offset = math.floor((note.get_offset() - tick_offset) / self.ticks_per_frame)
+                # Determine the frames where the note begins and ends
+                frame_onset = math.floor(note.onset / self.ticks_per_frame)
                 frame_offset = math.floor(note.get_offset() / self.ticks_per_frame)
 
+                # Make sure the note begins at or after the first measure
                 if frame_onset >= 0:
+                    # Account for the pitch activity of the note
                     pitch_activity[note.get_key_index(), frame_onset : frame_offset + 1] = 1
-
+                    # Loop through each frame where the note is active
                     for f in range(frame_onset, frame_offset + 1):
-                        # TODO - can combine with the frame onset/offset calculation
+                        # Determine the amount of ticks during the frame where the note is active
                         active_ticks = min(note.get_offset() + 1, (f + 1) * self.ticks_per_frame) - \
                                        max(note.onset, f * self.ticks_per_frame)
+                        # Add a score (number of active ticks) for the note at this frame
                         pitch_distr[note.get_key_index(), f : f + 1] += active_ticks
 
+            # Determine which frames contain pitch activity
             active_frames = np.sum(pitch_activity, axis=0) > 0
 
-            out_of_bounds_pitches = np.zeros((8, num_frames))
+            # Construct an empty array of activations to complete the first octave
+            out_of_bounds_pitches = np.zeros((NUM_PC - NUM_KEYS % NUM_PC, num_frames))
+
+            # Append the rest of the first octave to the pitch activations and shift by one to begin at C
             pitch_activity_uncollapsed = np.roll(np.concatenate((out_of_bounds_pitches, pitch_activity)), 1, axis=0)
-            pitch_class_activity = np.max(pitch_activity_uncollapsed.reshape(-1, 12, num_frames), axis=0)
+            # Collapse the pitch activations along the octave dimension to obtain pitch class activations
+            pitch_class_activity = np.max(pitch_activity_uncollapsed.reshape(-1, NUM_PC, num_frames), axis=0)
 
+            # Append the rest of the first octave to the pitch distributions and shift by one to begin at C
             pitch_distr_uncollapsed = np.roll(np.concatenate((out_of_bounds_pitches, pitch_distr)), 1, axis=0)
-            pitch_class_distr = np.sum(pitch_distr_uncollapsed.reshape(-1, 12, num_frames), axis=0)
+            # Collapse the pitch distributions along the octave dimension to obtain pitch class distributions
+            pitch_class_distr = np.sum(pitch_distr_uncollapsed.reshape(-1, NUM_PC, num_frames), axis=0)
 
+            # Normalize the pitch distributions to obtain probability-like values
             pitch_distr[:, active_frames] /= np.sum(pitch_distr[:, active_frames], axis=0)
-            pitch_class_distr[:, active_frames] /= np.sum(pitch_class_distr[:, active_frames], axis=0)
+            # Normalize the pitch class distributions to obtain probability-like values
+            # TODO - divide by zero???
+            try:
+                pitch_class_distr[:, active_frames] /= np.sum(pitch_class_distr[:, active_frames], axis=0)
+            except RuntimeWarning:
+                print()
 
             # Add all relevant entries to the dictionary
-            data.update({KEY_TRACK : track,
-                         #'note_exist_seq' : pitch_activity,
-                         #'note_dist_seq' : pitch_distr,
-                         KEY_PC_ACT : pitch_class_activity,
-                         KEY_PC_DST : pitch_class_distr,
-                         #'chord_seq' : None,
-                         #'root_seq' : None,
-                         #'quality_seq' : None,
-                         #'key_seq' : None,
-                         #'rn_seq' : None
+            data.update({
+                KEY_TRACK : track,
+                KEY_PC_ACT : pitch_class_activity,
+                KEY_PC_DST : pitch_class_distr,
             })
 
             if self.save_data:
@@ -234,12 +283,10 @@ class BPSFH(Dataset):
         for onset_quarter, midi_pitch, morph_pitch, \
                 quarter_duration, staff_num, measure_num in note_entries:
             # Convert the onset and duration to ticks
-            # TODO - floats or integers?
-            onset_tick = onset_quarter * self.ticks_per_quarter
-            tick_duration = quarter_duration * self.ticks_per_quarter
+            onset_tick = int(onset_quarter * self.ticks_per_quarter)
+            tick_duration = int(quarter_duration * self.ticks_per_quarter)
             # Add the note entry to the tracked list
-            # TODO - best way to handle zero duration?
-            notes.append(Note(midi_pitch, onset_tick, tick_duration))
+            notes.append(Note(int(midi_pitch), onset_tick, tick_duration))
 
         return notes
 
@@ -281,7 +328,7 @@ class BPSFH(Dataset):
             inversion = INVERSIONS[inversion]
 
             # Add the chord change entry to the tracked list
-            chords.append(Chord(degree, quality, inversion, key, onset_tick, tick_duration, roman_numeral))
+            chords.append(Chord(degree, quality, inversion, key, onset_tick, tick_duration))
 
         return chords
 

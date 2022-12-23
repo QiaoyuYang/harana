@@ -12,6 +12,10 @@ __all__ = [
     'KEY_PC_ACT',
     'KEY_PC_DST',
     'XLSX_EXT',
+    'NUM_PC',
+    'NUM_KEYS',
+    'MIN_MIDI',
+    'C_OFFSET',
     'TONICS',
     'CHORD_QUALITIES',
     'INVERSIONS',
@@ -53,8 +57,16 @@ KEY_PC_DST = 'pitch_class_distr'
 # MUSICAL ATTRIBUTES                             #
 ##################################################
 
-#TONICS = ['Cb', 'C', 'C#', 'Db', 'D', 'D#', 'Eb', 'E', 'E#', 'Fb', 'F',
-#          'F#', 'Gb', 'G', 'G#', 'Ab', 'A', 'A#', 'Bb', 'B', 'B#']
+NUM_PC = 12
+NUM_KEYS = 88
+MIN_MIDI = 21
+C_OFFSET = NUM_PC - MIN_MIDI % NUM_PC
+
+##################################################
+# MUSICAL THEORY                                 #
+##################################################
+
+# TODO - should this include B♯/C♭ or E♯/F♭?
 TONICS = {
     'C'  : 'C',
     'C+' : 'C♯',
@@ -93,8 +105,6 @@ INVERSIONS = ['root', '1st', '2nd', '3rd']
 MODES = ['ionian', 'aeolian']
 
 ACCIDENTALS = ['♮', '♭', '♯']
-#ACCIDENTALS = ['♮', '♭', '♯', '♭♭', '♯♯']
-#ACCIDENTALS = ['', '♭', '♯', '♭♭', '♯♯']
 
 FUNCTIONS = {
     '1'  : 0,
