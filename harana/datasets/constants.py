@@ -9,7 +9,15 @@ __all__ = [
     'NPZ_EXT',
     'CSV_EXT',
     'KEY_TRACK',
-    'XLSX_EXT'
+    'KEY_PC_ACT',
+    'KEY_PC_DST',
+    'XLSX_EXT',
+    'TONICS',
+    'CHORD_QUALITIES',
+    'INVERSIONS',
+    'MODES',
+    'ACCIDENTALS',
+    'FUNCTIONS'
 ]
 
 ##################################################
@@ -38,3 +46,68 @@ XLSX_EXT = 'xlsx'
 ##################################################
 
 KEY_TRACK = 'track'
+KEY_PC_ACT = 'pitch_class_activity'
+KEY_PC_DST = 'pitch_class_distr'
+
+##################################################
+# MUSICAL ATTRIBUTES                             #
+##################################################
+
+#TONICS = ['Cb', 'C', 'C#', 'Db', 'D', 'D#', 'Eb', 'E', 'E#', 'Fb', 'F',
+#          'F#', 'Gb', 'G', 'G#', 'Ab', 'A', 'A#', 'Bb', 'B', 'B#']
+TONICS = {
+    'C'  : 'C',
+    'C+' : 'C♯',
+    'D-' : 'D♭',
+    'D'  : 'D',
+    'D+' : 'D♯',
+    'E-' : 'E♭',
+    'E'  : 'E',
+    'F'  : 'F',
+    'F+' : 'F♯',
+    'G-' : 'G♭',
+    'G'  : 'G',
+    'G+' : 'G♯',
+    'A-' : 'A♭',
+    'A'  : 'A',
+    'A+' : 'A♯',
+    'B-' : 'B♭',
+    'B'  : 'B'
+    }
+
+CHORD_QUALITIES = {
+    'M': 'maj',
+    'm': 'min',
+    'a': 'aug',
+    'd': 'dim',
+    'M7': 'maj7',
+    'm7': 'min7',
+    'D7': 'dom7',
+    'h7': 'hdi7',
+    'd7': 'dim7',
+    'a6': 'aug6'
+}
+
+INVERSIONS = ['root', '1st', '2nd', '3rd']
+
+MODES = ['ionian', 'aeolian']
+
+ACCIDENTALS = ['♮', '♭', '♯']
+#ACCIDENTALS = ['♮', '♭', '♯', '♭♭', '♯♯']
+#ACCIDENTALS = ['', '♭', '♯', '♭♭', '♯♯']
+
+FUNCTIONS = {
+    '1'  : 0,
+    '♭2' : 1,
+    '2'  : 2,
+    '♭3' : 3,
+    '3'  : 4,
+    '4'  : 5,
+    '♯4' : 6,
+    '♭5' : 6,
+    '5'  : 7,
+    '♭6' : 8,
+    '6'  : 9,
+    '♭7' : 10,
+    '7'  : 11
+}

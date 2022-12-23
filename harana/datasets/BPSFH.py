@@ -22,8 +22,8 @@ class BPSFH(Dataset):
     """
 
     # TODO - remove after verifying same output
-    tensors_collapsed = torch.load('harana/datasets/sample_tensors_collapsed')
-    tensors_uncollapsed = torch.load('harana/datasets/sample_tensors_uncollapsed')
+    #tensors_collapsed = torch.load('harana/datasets/sample_tensors_collapsed')
+    #tensors_uncollapsed = torch.load('harana/datasets/sample_tensors_uncollapsed')
 
     def __init__(self, base_dir=None, tracks=None, ticks_per_quarter=24,
                        frames_per_quarter=4, frames_per_sample=8, reset_data=False,
@@ -147,15 +147,13 @@ class BPSFH(Dataset):
             # TODO - compute all relevant matrices
             #note_exist_seq = self.tensors_uncollapsed[0][track].cpu().detach().numpy().reshape(-1, 89).T
             #note_dist_seq = self.tensors_uncollapsed[1][track].cpu().detach().numpy().reshape(-1, 89).T
-            pc_exist_seq = self.tensors_uncollapsed[2][track].cpu().detach().numpy().reshape(-1, 13).T
-            pc_dist_seq = self.tensors_uncollapsed[3][track].cpu().detach().numpy().reshape(-1, 13).T
+            #pc_exist_seq = self.tensors_uncollapsed[2][track].cpu().detach().numpy().reshape(-1, 13).T
+            #pc_dist_seq = self.tensors_uncollapsed[3][track].cpu().detach().numpy().reshape(-1, 13).T
             #chord_seq = self.tensors_uncollapsed[4][track].cpu().detach().numpy()
             #root_seq = self.tensors_uncollapsed[5][track].cpu().detach().numpy()
             #quality_seq = self.tensors_uncollapsed[6][track].cpu().detach().numpy()
             #key_seq = self.tensors_uncollapsed[7][track].cpu().detach().numpy()
             #rn_seq = self.tensors_uncollapsed[8][track].cpu().detach().numpy()
-            #sample_idx_in_song = self.tensors_uncollapsed[10][track].cpu().detach().numpy()
-            #qn_offset = self.tensors_uncollapsed[11][track].cpu().detach().numpy()
 
             # TODO - assumes sorted notes
             # Determine the offset in ticks before zero time
@@ -182,7 +180,6 @@ class BPSFH(Dataset):
                 if frame_onset >= 0:
                     pitch_activity[note.get_key_index(), frame_onset : frame_offset + 1] = 1
 
-                    # TODO - this seems like a really weird thing to do
                     for f in range(frame_onset, frame_offset + 1):
                         # TODO - can combine with the frame onset/offset calculation
                         active_ticks = min(note.get_offset() + 1, (f + 1) * self.ticks_per_frame) - \
@@ -203,17 +200,15 @@ class BPSFH(Dataset):
 
             # Add all relevant entries to the dictionary
             data.update({KEY_TRACK : track,
-                         'note_exist_seq' : pitch_activity,
-                         'note_dist_seq' : pitch_distr,
-                         'pc_exist_seq' : pitch_class_activity,
-                         'pc_dist_seq' : pitch_class_distr,
-                         'chord_seq' : None,
-                         'root_seq' : None,
-                         'quality_seq' : None,
-                         'key_seq' : None,
-                         'rn_seq' : None,
-                         'sample_idx_in_song' : None,
-                         'qn_offset' : None
+                         #'note_exist_seq' : pitch_activity,
+                         #'note_dist_seq' : pitch_distr,
+                         KEY_PC_ACT : pitch_class_activity,
+                         KEY_PC_DST : pitch_class_distr,
+                         #'chord_seq' : None,
+                         #'root_seq' : None,
+                         #'quality_seq' : None,
+                         #'key_seq' : None,
+                         #'rn_seq' : None
             })
 
             if self.save_data:
@@ -280,8 +275,10 @@ class BPSFH(Dataset):
             # Determine the duration of the chord change in ticks
             tick_duration = offset_tick - onset_tick
 
-            # Use alternate symbols for flat and sharp
-            #key.replace('-', 'b').replace('+', '#')
+            # Convert fields to appropriate string representations
+            degree = str(degree)
+            quality = CHORD_QUALITIES[quality]
+            inversion = INVERSIONS[inversion]
 
             # Add the chord change entry to the tracked list
             chords.append(Chord(degree, quality, inversion, key, onset_tick, tick_duration, roman_numeral))
