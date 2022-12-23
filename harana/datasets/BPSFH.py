@@ -36,7 +36,7 @@ class BPSFH(Dataset):
         self.base_dir = os.path.join(DEFAULT_DATASETS_DIR, self.dataset_name()) if base_dir is None else base_dir
 
         # Check if the dataset exists (in full) at the specified path
-        if len(os.listdir(self.base_dir)) != len(self.available_tracks()) + 1:
+        if not os.path.exists(self.base_dir) or len(os.listdir(self.base_dir)) != len(self.available_tracks()) + 1:
             warnings.warn(f'Dataset was incomplete or could not find at specified '
                           f'path \'{self.base_dir}\'. Attempting to download...', category=RuntimeWarning)
             # Download the dataset if it is missing
@@ -145,10 +145,10 @@ class BPSFH(Dataset):
             chords = self.read_chords(track)
 
             # TODO - compute all relevant matrices
-            note_exist_seq = self.tensors_uncollapsed[0][track].cpu().detach().numpy().reshape(-1, 89).T
-            note_dist_seq = self.tensors_uncollapsed[1][track].cpu().detach().numpy().reshape(-1, 89).T
-            #pc_exist_seq = self.tensors_uncollapsed[2][track].cpu().detach().numpy()
-            #pc_dist_seq = self.tensors_uncollapsed[3][track].cpu().detach().numpy()
+            #note_exist_seq = self.tensors_uncollapsed[0][track].cpu().detach().numpy().reshape(-1, 89).T
+            #note_dist_seq = self.tensors_uncollapsed[1][track].cpu().detach().numpy().reshape(-1, 89).T
+            pc_exist_seq = self.tensors_uncollapsed[2][track].cpu().detach().numpy().reshape(-1, 13).T
+            pc_dist_seq = self.tensors_uncollapsed[3][track].cpu().detach().numpy().reshape(-1, 13).T
             #chord_seq = self.tensors_uncollapsed[4][track].cpu().detach().numpy()
             #root_seq = self.tensors_uncollapsed[5][track].cpu().detach().numpy()
             #quality_seq = self.tensors_uncollapsed[6][track].cpu().detach().numpy()
@@ -191,14 +191,22 @@ class BPSFH(Dataset):
 
             active_frames = np.sum(pitch_activity, axis=0) > 0
 
+            out_of_bounds_pitches = np.zeros((8, num_frames))
+            pitch_activity_uncollapsed = np.roll(np.concatenate((out_of_bounds_pitches, pitch_activity)), 1, axis=0)
+            pitch_class_activity = np.max(pitch_activity_uncollapsed.reshape(-1, 12, num_frames), axis=0)
+
+            pitch_distr_uncollapsed = np.roll(np.concatenate((out_of_bounds_pitches, pitch_distr)), 1, axis=0)
+            pitch_class_distr = np.sum(pitch_distr_uncollapsed.reshape(-1, 12, num_frames), axis=0)
+
             pitch_distr[:, active_frames] /= np.sum(pitch_distr[:, active_frames], axis=0)
+            pitch_class_distr[:, active_frames] /= np.sum(pitch_class_distr[:, active_frames], axis=0)
 
             # Add all relevant entries to the dictionary
             data.update({KEY_TRACK : track,
                          'note_exist_seq' : pitch_activity,
-                         'note_dist_seq' : None,
-                         'pc_exist_seq' : None,
-                         'pc_dist_seq' : None,
+                         'note_dist_seq' : pitch_distr,
+                         'pc_exist_seq' : pitch_class_activity,
+                         'pc_dist_seq' : pitch_class_distr,
                          'chord_seq' : None,
                          'root_seq' : None,
                          'quality_seq' : None,

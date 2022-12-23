@@ -49,8 +49,7 @@ class Note(object):
         """
 
         # Offset to start at C and obtain remainder
-        # TODO - double check this based on above TODO
-        pitch_class_index = (self.get_key_index() - 4) % 12
+        pitch_class_index = (self.get_key_index() - 3) % 12
 
         return pitch_class_index
 
