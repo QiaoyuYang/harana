@@ -1,5 +1,5 @@
 # Our imports
-from .utils import Note, Chord
+from .utils import Note, Chord, Meter
 from .constants import *
 
 # Regular imports
@@ -20,7 +20,6 @@ class BPSFH(Dataset):
     """
     TODO
     """
-
     # TODO - remove after verifying same output
     tensors_collapsed = torch.load('harana/datasets/sample_tensors_collapsed')
     tensors_uncollapsed = torch.load('harana/datasets/sample_tensors_uncollapsed')
@@ -115,6 +114,10 @@ class BPSFH(Dataset):
         # Slice the track's ground-truth
         data = self.get_track_data(track_id)
 
+        # Remove unnecessary and un-batchable entries
+        data.pop(KEY_OFFSET, None)
+        data.pop(KEY_METER, None)
+
         return data
 
     def get_track_data(self, track_id, frame_start=None, frames_per_sample=None, snap_to_measure=True):
@@ -142,12 +145,14 @@ class BPSFH(Dataset):
             # If a specific starting frame was not provided, sample one randomly
             frame_start = self.rng.randint(0, data[KEY_PC_ACT].shape[-1] - frames_per_sample)
 
+        if snap_to_measure:
+            # Compute the amount of frames a single measure spans
+            measure_length = self.frames_per_quarter * data[KEY_METER].get_measure_length()
+            # Make sure the sampled frame start corresponds to the start of a measure
+            frame_start = round(frame_start / measure_length) * measure_length
+
         # Determine where the sample ends
         frame_stop = frame_start + frames_per_sample
-
-        if snap_to_measure:
-            # TODO - implement this based off of TODO below
-            print()
 
         # Loop through the dictionary keys
         for key in data.keys():
@@ -161,6 +166,8 @@ class BPSFH(Dataset):
     def load(self, track):
         """
         Get the ground truth for a track. If it has already been saved, load it.
+
+        TODO - can potentially break this function up
 
         Parameters
         ----------
@@ -180,8 +187,10 @@ class BPSFH(Dataset):
         if self.save_data and os.path.exists(gt_path):
             # Load and unpack the saved data for the track
             data = dict(np.load(gt_path, allow_pickle=True))
-            # Unpack the track ID from the array
+            # Unpack the track ID, frame offset, and meter from their respective arrays
             data[KEY_TRACK] = data[KEY_TRACK].item()
+            data[KEY_OFFSET] = data[KEY_OFFSET].item()
+            data[KEY_METER] = data[KEY_METER].item()
         else:
             # Initialize a new dictionary
             data = dict()
@@ -189,48 +198,52 @@ class BPSFH(Dataset):
             # Obtain a list of all notes which occur in the track
             notes = self.read_notes(track)
 
-            # Obtain a list of all chord changes which occur in the track
-            chords = self.read_chords(track)
-
             # Make sure the notes are sorted before continuing
             notes = sorted(notes, key=lambda x: x.onset)
 
             # Determine the offset in ticks before zero time
-            # TODO - should probably include this in ground-truth, and act
-            #        accordingly in self.get_track_data when snap_to_measure=True
             tick_offset = notes[0].onset
             # Determine the final tick of the last note
             tick_final = notes[-1].get_offset()
 
-            # Compute the total number of ticks/frames for the track
-            #num_ticks = notes[-1].get_offset() - tick_offset
-            #num_frames = math.ceil(num_ticks / self.ticks_per_frame)
-            # Subtract offset so frames begin at the start of a measure
-            #num_frames = math.ceil((num_ticks - tick_offset) / self.ticks_per_frame)
-            num_frames = math.ceil(tick_final / self.ticks_per_frame)
+            # Determine how many ticks lay in the positive and negative ranges
+            num_pos_range_ticks = max(0, tick_final) - max(0, tick_offset)
+            num_neg_range_ticks = min(0, tick_final) - min(0, tick_offset)
+
+            # Determine how many frames correspond to time before the measure at zero time
+            num_neg_frames = math.ceil(num_neg_range_ticks / self.ticks_per_frame)
+
+            # TODO - optionally disable negative frames?
+
+            # Compute the global tick offset needed to start with a full frame
+            tick_offset_frame = -(num_neg_frames * self.ticks_per_frame)
+
+            # Determine the total number of frames based off of both ranges,
+            # such that frames onsets line up with the start of each measure
+            num_frames = num_neg_frames + math.ceil(num_pos_range_ticks / self.ticks_per_frame)
 
             # Initialize arrays to hold frame-level pitch activity and distribution
             pitch_activity = np.zeros((NUM_KEYS, num_frames))
             pitch_distr = pitch_activity.copy()
 
             for note in notes:
-                #frame_onset = math.floor((note.onset - tick_offset) / self.ticks_per_frame)
-                #frame_offset = math.floor((note.get_offset() - tick_offset) / self.ticks_per_frame)
+                # Adjust the onset and offset tick based on the pre-measureticks
+                adjusted_onset_tick = note.onset - tick_offset_frame
+                adjusted_offset_tick = note.get_offset() - tick_offset_frame
                 # Determine the frames where the note begins and ends
-                frame_onset = math.floor(note.onset / self.ticks_per_frame)
-                frame_offset = math.floor(note.get_offset() / self.ticks_per_frame)
+                frame_onset = math.floor(adjusted_onset_tick / self.ticks_per_frame)
+                frame_offset = math.floor(adjusted_offset_tick / self.ticks_per_frame)
 
-                # Make sure the note begins at or after the first measure
-                if frame_onset >= 0:
-                    # Account for the pitch activity of the note
-                    pitch_activity[note.get_key_index(), frame_onset : frame_offset + 1] = 1
-                    # Loop through each frame where the note is active
-                    for f in range(frame_onset, frame_offset + 1):
-                        # Determine the amount of ticks during the frame where the note is active
-                        active_ticks = min(note.get_offset() + 1, (f + 1) * self.ticks_per_frame) - \
-                                       max(note.onset, f * self.ticks_per_frame)
-                        # Add a score (number of active ticks) for the note at this frame
-                        pitch_distr[note.get_key_index(), f : f + 1] += active_ticks
+                # Account for the pitch activity of the note
+                pitch_activity[note.get_key_index(), frame_onset : frame_offset + 1] = 1
+                # Loop through each frame where the note is active
+                for f in range(frame_onset, frame_offset + 1):
+                    # Determine the amount of ticks during the frame where the note is active
+                    active_ticks = min(adjusted_offset_tick + 1, (f + 1) * self.ticks_per_frame) - \
+                                   max(adjusted_onset_tick, f * self.ticks_per_frame)
+                    # Add a score (number of active ticks) for the note at this frame
+                    # TODO - adding will artificially increase strength of duplicated notes
+                    pitch_distr[note.get_key_index(), f : f + 1] += active_ticks
 
             # Determine which frames contain pitch activity
             active_frames = np.sum(pitch_activity, axis=0) > 0
@@ -254,21 +267,31 @@ class BPSFH(Dataset):
             pitch_class_distr[:, active_frames] /= np.sum(pitch_class_distr[:, active_frames], axis=0)
 
             # TODO - verify equivalence of values across all tracks, then remove the following 9 lines
+            num_pos_frames = math.ceil(num_pos_range_ticks / self.ticks_per_frame)
             note_exist_seq = self.tensors_uncollapsed[0][track].cpu().detach().numpy().reshape(-1, 89).T
             note_dist_seq = self.tensors_uncollapsed[1][track].cpu().detach().numpy().reshape(-1, 89).T
             pc_exist_seq = self.tensors_uncollapsed[2][track].cpu().detach().numpy().reshape(-1, 13).T
             pc_dist_seq = self.tensors_uncollapsed[3][track].cpu().detach().numpy().reshape(-1, 13).T
             print()
-            print(np.allclose(pitch_activity[..., : num_frames - 8], note_exist_seq[:-1, : num_frames - 8]))
-            print(np.allclose(pitch_distr[..., : num_frames - 8], note_dist_seq[:-1, : num_frames - 8]))
-            print(np.allclose(pitch_class_activity[..., : num_frames - 8], pc_exist_seq[:-1, : num_frames - 8]))
-            print(np.allclose(pitch_class_distr[..., : num_frames - 8], pc_dist_seq[:-1, : num_frames - 8]))
+            print(np.allclose(pitch_activity[..., num_neg_frames : num_frames - 8], note_exist_seq[:-1, : num_pos_frames - 8]))
+            print(np.allclose(pitch_distr[..., num_neg_frames : num_frames - 8], note_dist_seq[:-1, : num_pos_frames - 8]))
+            print(np.allclose(pitch_class_activity[..., num_neg_frames : num_frames - 8], pc_exist_seq[:-1, : num_pos_frames - 8]))
+            print(np.allclose(pitch_class_distr[..., num_neg_frames : num_frames - 8], pc_dist_seq[:-1, : num_pos_frames - 8]))
+
+            # Obtain a list of all chord changes which occur in the track
+            chords = self.read_chords(track)
+
+            # Obtain the meter information for the track
+            meter = self.read_meter(track)
 
             # Add all relevant entries to the dictionary
             data.update({
                 KEY_TRACK : track,
                 KEY_PC_ACT : pitch_class_activity,
                 KEY_PC_DST : pitch_class_distr,
+                KEY_OFFSET : num_neg_frames,
+                # TODO - chords data
+                KEY_METER : meter
             })
 
             if self.save_data:
@@ -341,10 +364,36 @@ class BPSFH(Dataset):
             quality = CHORD_QUALITIES[quality]
             inversion = INVERSIONS[inversion]
 
-            # Add the chord change entry to the tracked list
-            chords.append(Chord(degree, quality, inversion, key, onset_tick, tick_duration))
+            if tick_duration:
+                # Add the chord change entry to the tracked list if duration is non-zero
+                chords.append(Chord(degree, quality, inversion, key, onset_tick, tick_duration))
 
         return chords
+
+    def read_meter(self, track):
+        """
+        TODO
+        """
+
+        # Determine the paths to the track's beat and downbeat annotations, respectively
+        beats_path, downbeats_path = self.get_beats_path(track), self.get_downbeats_path(track)
+
+        # Load the tabulated data from the xlsx files as a NumPy arrays
+        beat_entries = pd.read_excel(beats_path, header=None).to_numpy().flatten()
+        downbeat_entries = pd.read_excel(downbeats_path, header=None).to_numpy().flatten()
+
+        # Infer the quarter-note values for a beat and a downbeat
+        beat_quarter = np.median(np.diff(beat_entries))
+        downbeat_quarter = np.median(np.diff(downbeat_entries))
+
+        # Compute the metrical components from the inferred beat and downbeat values
+        count = downbeat_quarter / beat_quarter
+        division = 4 * (1 / beat_quarter)
+
+        # Keep track of the meter information
+        meter = Meter(round(count), round(division))
+
+        return meter
 
     def get_gt_path(self, track=None):
         """
@@ -389,6 +438,31 @@ class BPSFH(Dataset):
         chords_path = os.path.join(self.base_dir, f'{track}', f'chords.{XLSX_EXT}')
 
         return chords_path
+
+    def get_beats_path(self, track):
+        """
+        TODO
+        """
+
+        # Construct the path to a track's beat annotations
+        beats_path = os.path.join(self.base_dir, f'{track}', f'beats.{XLSX_EXT}')
+
+        return beats_path
+
+    def get_downbeats_path(self, track):
+        """
+        TODO
+        """
+
+        # Construct the path to a track's downbeat annotations
+        downbeats_path = os.path.join(self.base_dir, f'{track}', f'dBeats.{XLSX_EXT}')
+
+        if not os.path.exists(downbeats_path):
+            # There is no capital B in the file name for some tracks...
+            downbeats_path = os.path.join(os.path.dirname(downbeats_path),
+                                          os.path.basename(downbeats_path).lower())
+
+        return downbeats_path
 
     @staticmethod
     def available_tracks():

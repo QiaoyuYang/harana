@@ -11,6 +11,8 @@ __all__ = [
     'KEY_TRACK',
     'KEY_PC_ACT',
     'KEY_PC_DST',
+    'KEY_OFFSET',
+    'KEY_METER',
     'XLSX_EXT',
     'NUM_PC',
     'NUM_KEYS',
@@ -52,6 +54,8 @@ XLSX_EXT = 'xlsx'
 KEY_TRACK = 'track'
 KEY_PC_ACT = 'pitch_class_activity'
 KEY_PC_DST = 'pitch_class_distr'
+KEY_OFFSET = 'negative_frame_offset'
+KEY_METER = 'meter'
 
 ##################################################
 # MUSICAL ATTRIBUTES                             #

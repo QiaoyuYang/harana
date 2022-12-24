@@ -188,3 +188,27 @@ class Chord(object):
         inversion_index = INVERSIONS.index(self.inversion)
 
         return inversion_index
+
+
+class Meter(object):
+    """
+    TODO
+    """
+
+    def __init__(self, count, division):
+        """
+        TODO
+        """
+
+        self.count = count
+        self.division = division
+
+    def get_measure_length(self):
+        """
+        TODO
+        """
+
+        # Compute the length of a measure in quarter notes using metric information
+        measure_length = round(self.count * (4 / self.division))
+
+        return measure_length
