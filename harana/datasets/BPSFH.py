@@ -21,6 +21,10 @@ class BPSFH(Dataset):
     TODO
     """
 
+    # TODO - remove after verifying same output
+    tensors_collapsed = torch.load('harana/datasets/sample_tensors_collapsed')
+    tensors_uncollapsed = torch.load('harana/datasets/sample_tensors_uncollapsed')
+
     def __init__(self, base_dir=None, tracks=None, ticks_per_quarter=24,
                        frames_per_quarter=4, frames_per_sample=8, reset_data=False,
                        store_data=False, save_data=False, save_loc=None, seed=0):
@@ -142,7 +146,7 @@ class BPSFH(Dataset):
         frame_stop = frame_start + frames_per_sample
 
         if snap_to_measure:
-            # TODO
+            # TODO - implement this based off of TODO below
             print()
 
         # Loop through the dictionary keys
@@ -247,11 +251,18 @@ class BPSFH(Dataset):
             # Normalize the pitch distributions to obtain probability-like values
             pitch_distr[:, active_frames] /= np.sum(pitch_distr[:, active_frames], axis=0)
             # Normalize the pitch class distributions to obtain probability-like values
-            # TODO - divide by zero???
-            try:
-                pitch_class_distr[:, active_frames] /= np.sum(pitch_class_distr[:, active_frames], axis=0)
-            except RuntimeWarning:
-                print()
+            pitch_class_distr[:, active_frames] /= np.sum(pitch_class_distr[:, active_frames], axis=0)
+
+            # TODO - verify equivalence of values across all tracks, then remove the following 9 lines
+            note_exist_seq = self.tensors_uncollapsed[0][track].cpu().detach().numpy().reshape(-1, 89).T
+            note_dist_seq = self.tensors_uncollapsed[1][track].cpu().detach().numpy().reshape(-1, 89).T
+            pc_exist_seq = self.tensors_uncollapsed[2][track].cpu().detach().numpy().reshape(-1, 13).T
+            pc_dist_seq = self.tensors_uncollapsed[3][track].cpu().detach().numpy().reshape(-1, 13).T
+            print()
+            print(np.allclose(pitch_activity[..., : num_frames - 8], note_exist_seq[:-1, : num_frames - 8]))
+            print(np.allclose(pitch_distr[..., : num_frames - 8], note_dist_seq[:-1, : num_frames - 8]))
+            print(np.allclose(pitch_class_activity[..., : num_frames - 8], pc_exist_seq[:-1, : num_frames - 8]))
+            print(np.allclose(pitch_class_distr[..., : num_frames - 8], pc_dist_seq[:-1, : num_frames - 8]))
 
             # Add all relevant entries to the dictionary
             data.update({
@@ -283,10 +294,13 @@ class BPSFH(Dataset):
         for onset_quarter, midi_pitch, morph_pitch, \
                 quarter_duration, staff_num, measure_num in note_entries:
             # Convert the onset and duration to ticks
-            onset_tick = int(onset_quarter * self.ticks_per_quarter)
-            tick_duration = int(quarter_duration * self.ticks_per_quarter)
-            # Add the note entry to the tracked list
-            notes.append(Note(int(midi_pitch), onset_tick, tick_duration))
+            # TODO - I think we should floor the onset tick and ceiling the duration
+            onset_tick = onset_quarter * self.ticks_per_quarter
+            tick_duration = quarter_duration * self.ticks_per_quarter
+
+            if tick_duration:
+                # Add the note entry to the tracked list if duration is non-zero
+                notes.append(Note(round(midi_pitch), round(onset_tick), round(tick_duration)))
 
         return notes
 

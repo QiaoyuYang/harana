@@ -92,6 +92,10 @@ def main(args_in):
 	train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
 	validation_loader = DataLoader(dataset=validation_dataset, batch_size=batch_size, shuffle=True)
 
+	while True:
+		for batch in train_loader:
+			print()
+
 	# Initialize the device
 	device = torch.device('cuda:3' if torch.cuda.is_available() else 'cpu')
 
