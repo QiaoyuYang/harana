@@ -11,7 +11,7 @@ import pandas as pd
 import numpy as np
 import warnings
 import shutil
-import torch
+import torch # TODO - remove torch
 import math
 import os
 
@@ -22,7 +22,7 @@ class BPSFH(Dataset):
     """
     # TODO - remove after verifying same output
     tensors_collapsed = torch.load('harana/datasets/sample_tensors_collapsed')
-    tensors_uncollapsed = torch.load('harana/datasets/sample_tensors_uncollapsed')
+    tensors_new = torch.load('harana/datasets/sample_tensors_check_duration_fixed')
 
     def __init__(self, base_dir=None, tracks=None, ticks_per_quarter=24,
                        frames_per_quarter=4, frames_per_sample=8, reset_data=False,
@@ -268,15 +268,16 @@ class BPSFH(Dataset):
 
             # TODO - verify equivalence of values across all tracks, then remove the following 9 lines
             num_pos_frames = math.ceil(num_pos_range_ticks / self.ticks_per_frame)
-            note_exist_seq = self.tensors_uncollapsed[0][track].cpu().detach().numpy().reshape(-1, 89).T
-            note_dist_seq = self.tensors_uncollapsed[1][track].cpu().detach().numpy().reshape(-1, 89).T
-            pc_exist_seq = self.tensors_uncollapsed[2][track].cpu().detach().numpy().reshape(-1, 13).T
-            pc_dist_seq = self.tensors_uncollapsed[3][track].cpu().detach().numpy().reshape(-1, 13).T
-            print()
-            print(np.allclose(pitch_activity[..., num_neg_frames : num_frames - 8], note_exist_seq[:-1, : num_pos_frames - 8]))
-            print(np.allclose(pitch_distr[..., num_neg_frames : num_frames - 8], note_dist_seq[:-1, : num_pos_frames - 8]))
-            print(np.allclose(pitch_class_activity[..., num_neg_frames : num_frames - 8], pc_exist_seq[:-1, : num_pos_frames - 8]))
-            print(np.allclose(pitch_class_distr[..., num_neg_frames : num_frames - 8], pc_dist_seq[:-1, : num_pos_frames - 8]))
+            note_exist_seq = self.tensors_new[0][track].cpu().detach().numpy().reshape(-1, 89).T
+            note_dist_seq = self.tensors_new[1][track].cpu().detach().numpy().reshape(-1, 89).T
+            pc_exist_seq = self.tensors_new[2][track].cpu().detach().numpy().reshape(-1, 13).T
+            pc_dist_seq = self.tensors_new[3][track].cpu().detach().numpy().reshape(-1, 13).T
+            if not (np.allclose(pitch_activity[..., num_neg_frames : num_frames - 8], note_exist_seq[:-1, : num_pos_frames - 8]) and \
+                    np.allclose(pitch_distr[..., num_neg_frames : num_frames - 8], note_dist_seq[:-1, : num_pos_frames - 8]) and \
+                    np.allclose(pitch_class_activity[..., num_neg_frames : num_frames - 8], pc_exist_seq[:-1, : num_pos_frames - 8]) and \
+                    np.allclose(pitch_class_distr[..., num_neg_frames : num_frames - 8], pc_dist_seq[:-1, : num_pos_frames - 8])):
+                print(f'\nTrack {track}:')
+                print(np.where(pitch_activity[..., num_neg_frames : num_frames - 8] != note_exist_seq[:-1, : num_pos_frames - 8]))
 
             # Obtain a list of all chord changes which occur in the track
             chords = self.read_chords(track)
