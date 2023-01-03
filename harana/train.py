@@ -2,6 +2,7 @@
 
 # My import
 from .datasets.BPSFH_processor import BPSFHDataset
+from .datasets.BPSFH import BPSFH
 from .models.model_assembler import ModelComplete
 from .utils import chord, eval_utils
 
@@ -23,24 +24,39 @@ torch.manual_seed(0)
 def main(args_in):
 	parser = argparse.ArgumentParser("Training")
 
-	parser.add_argument('--dataset', help="name of the dataset, ('BPSFH')", default = "BPSFH", type=str)
+	parser.add_argument('--dataset', help="name of the dataset, ('BPSFH')", default="BPSFH", type=str)
 	
+<<<<<<< HEAD
 	parser.add_argument('--batch_size', help="number of samples in each batch", default = 96, type=int)
 	parser.add_argument('--sample_size', help="number of frames in each sample", default = 48, type=int)
 	parser.add_argument('--segment_max_len', help="max number of frames in a segment", default = 8, type=int)
+=======
+	parser.add_argument('--batch_size', help="number of samples in each batch", default=16, type=int)
+	parser.add_argument('--sample_size', help="number of frames in each sample", default=8, type=int)
+	parser.add_argument('--segment_max_len', help="max number of frames in a segment", default=8, type=int)
+>>>>>>> a455594977a913192458b283e38c6c068d1b342d
 	
-	parser.add_argument('--frame_type', help="type of the representation to encode the basic time unit, ('inter_onset', 'fixed_size')", default = "fixed_size", type=str)
-	parser.add_argument('--tpqn', help="number of ticks per quarter note", default = 24, type=int)
-	parser.add_argument('--fpqn', help="number of frames per quarter note if fixed-sized frames are used", default = 4, type=int)
+	parser.add_argument('--frame_type', help="type of the representation to encode the basic time unit, ('inter_onset', 'fixed_size')", default="fixed_size", type=str)
+	parser.add_argument('--tpqn', help="number of ticks per quarter note", default=24, type=int)
+	parser.add_argument('--fpqn', help="number of frames per quarter note if fixed-sized frames are used", default=4, type=int)
 
-	parser.add_argument('--num_label', help="number of chord labels", default = 120, type=int)
+	parser.add_argument('--num_label', help="number of chord labels", default=120, type=int)
 
+<<<<<<< HEAD
 	parser.add_argument('--note_transform_type', help="type of the note transform, (none, cnn, dense_gru)", default = "dense_gru", type=str)
 	parser.add_argument('--chord_transform_type', help="type of the chord transform, (weight_vector, fc1, fc2)", default = "weight_vector", type=str)
 	parser.add_argument('--decode_type', help="type of the decoder, (softmax, nade, semi_crf)", default = "softmax", type=str)
 	parser.add_argument('--label_type', help="type of the chord label, (root_quality, key_rn)", default = "all", type=str)
 
 	parser.add_argument('--embedding_size', help="dimension size of the embedding", default = "64", type=int)
+=======
+	parser.add_argument('--note_transform_type', help="type of the note transform, (none, cnn, dense_gru)", default="none", type=str)
+	parser.add_argument('--chord_transform_type', help="type of the chord transform, (weight_vector, fc1, fc2)", default="fc1", type=str)
+	parser.add_argument('--decode_type', help="type of the decoder, (softmax, nade, semi_crf)", default="semi_crf", type=str)
+	parser.add_argument('--label_type', help="type of the chord label, (root_quality, key_rn)", default="root_quality", type=str)
+
+	parser.add_argument('--embedding_size', help="dimension size of the embedding", default="13", type=int)
+>>>>>>> a455594977a913192458b283e38c6c068d1b342d
 
 	# Extract the information from the input arguments
 	args = parser.parse_args(args_in)
@@ -67,7 +83,17 @@ def main(args_in):
 
 
 	# Generate a customized pytorch Dataset with the specified dataset name
-	dataset_bpsfh = BPSFHDataset(dataset_root_dir, sample_size, frame_type, tpqn, fpqn)
+	#dataset_bpsfh = BPSFHDataset(dataset_root_dir, sample_size, frame_type, tpqn, fpqn)
+	dataset_bpsfh = BPSFH(base_dir=None,
+						  tracks=None,
+						  ticks_per_quarter=tpqn,
+						  frames_per_quarter=fpqn,
+						  frames_per_sample=sample_size,
+						  reset_data=False,
+						  store_data=True,
+						  save_data=True,
+						  save_loc=None,
+						  seed=0)
 
 	# The proportion of the dataset that is used to train
 	train_proportion = 0.8
@@ -80,6 +106,10 @@ def main(args_in):
 	train_dataset, validation_dataset = random_split(dataset_bpsfh, [train_size, validation_size])
 	train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
 	validation_loader = DataLoader(dataset=validation_dataset, batch_size=batch_size, shuffle=True)
+
+	while True:
+		for batch in train_loader:
+			print()
 
 	# Initialize the device
 	device = torch.device('cuda:3' if torch.cuda.is_available() else 'cpu')

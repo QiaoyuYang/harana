@@ -159,7 +159,7 @@ class BPSFH_DataReader(HADataReader):
 					# Check if each type of information is needed and read them in
 					if note:
 						self.notes_all_song[song_idx] = self.read_notes(os.path.join(subdir, notes_filename))
-					if chord:
+					if harmony:
 						self.harmonies_all_song[song_idx] = self.read_harmonies(os.path.join(subdir, harmonies_filename))
 					if meta:
 						meta_info = self.read_meta(os.path.join(subdir, meta_filename))
