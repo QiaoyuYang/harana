@@ -32,10 +32,10 @@ class HADataReader:
 		self.fpqn = fpqn
 		
 		# Number of pitch values on piano
-		self.num_piano_pitch = 89
+		self.num_piano_pitch = 88
 		
-		# Number of distinctive pitch classes, one for none
-		self.num_pc = 13
+		# Number of distinctive pitch classes
+		self.num_pc = 12
 	
 	def data2sample_tensors(self, frame_type):
 		"""
@@ -51,15 +51,20 @@ class HADataReader:
 
 		"""
 
-		note_exist_seq_all_samples = torch.tensor([])
-		note_dist_seq_all_samples = torch.tensor([])
-		pc_exist_seq_all_samples = torch.tensor([])
-		pc_dist_seq_all_samples = torch.tensor([])
-		chord_seq_all_samples = torch.tensor([])
-		root_seq_all_samples = torch.tensor([])
-		quality_seq_all_samples = torch.tensor([])
-		key_seq_all_samples = torch.tensor([])
-		rn_seq_all_samples = torch.tensor([])
+		note_exist_frame_seq_all_samples = torch.tensor([])
+		note_dur_frame_seq_all_samples = torch.tensor([])
+		pc_exist_frame_seq_all_samples = torch.tensor([])
+		pc_dur_frame_seq_all_samples = torch.tensor([])
+		chord_frame_seq_all_samples = torch.tensor([])
+		root_frame_seq_all_samples = torch.tensor([])
+		quality_frame_seq_all_samples = torch.tensor([])
+		key_frame_seq_all_samples = torch.tensor([])
+		key_tonic_frame_seq_all_samples = torch.tensor([])
+		key_mode_frame_seq_all_samples = torch.tensor([])
+		pri_deg_frame_seq_all_samples = torch.tensor([])
+		sec_deg_frame_seq_all_samples = torch.tensor([])
+		inversion_frame_seq_all_samples = torch.tensor([])
+		rn_frame_seq_all_samples = torch.tensor([])
 		song_idx_all_samples = torch.tensor([])
 		sample_idx_in_song_all_samples = torch.tensor([])
 		qn_offset_cur_song_all_samples = torch.tensor([])
@@ -135,7 +140,7 @@ class HADataReader:
 				num_sample = int(np.floor((total_ticks - ticks_offset) / tps))
 
 				# Initialize the tensors used to store data
-				note_exist_seq, note_dist_seq, pc_exist_seq, pc_dist_seq, chord_seq, root_seq, quality_seq, key_seq, rn_seq, song_idx_cur_song, sample_idx_in_song, qn_offset_cur_song = self.initialize_tensors(num_sample)
+				self.initialize_tensors(num_sample)
 
 				# Auxillary assignment for the first frame
 				sample_end_frame = -1
@@ -145,9 +150,9 @@ class HADataReader:
 
 				# Iterate through each sample
 				for sample_idx in range(num_sample):
-					song_idx_cur_song[sample_idx] = song_idx
-					sample_idx_in_song[sample_idx] = sample_idx
-					qn_offset_cur_song[sample_idx] = qn_offset
+					self.song_idx_cur_song[sample_idx] = song_idx
+					self.sample_idx_in_song[sample_idx] = sample_idx
+					self.qn_offset_cur_song[sample_idx] = qn_offset
 					
 					# get the frame boundary of the current sample
 					sample_start_frame = sample_end_frame + 1
@@ -172,100 +177,155 @@ class HADataReader:
 						#print(notes_frame)
 						harmonies_frame = self.get_harmonies_in_region(harmonies_sample, frame_start_tick, frame_end_tick)
 
-						note_exist_seq, note_dist_seq, pc_exist_seq, pc_dist_seq, chord_seq, root_seq, quality_seq, key_seq, rn_seq = self.update_tensors(note_exist_seq, note_dist_seq, pc_exist_seq, pc_dist_seq, chord_seq, root_seq, quality_seq, key_seq, rn_seq, notes_frame, harmonies_frame, sample_idx, frame_idx)
+						self.update_tensors(notes_frame, harmonies_frame, sample_idx, frame_idx)
 
 			# Normalize the acculative pc tensors
-			note_dist_seq = note_dist_seq / note_dist_seq.sum(-1).unsqueeze(-1)
-			pc_dist_seq = pc_dist_seq / pc_dist_seq.sum(-1).unsqueeze(-1)
+			#note_dur_frame_seq = note_dur_frame_seq / note_dist_seq.sum(-1).unsqueeze(-1)
+			#pc_dur_frame_seq = pc_dur_frame_seq / pc_dist_seq.sum(-1).unsqueeze(-1)
 
+			self.sample_tensors = []
+			
 			# Concatenate the samples
-			note_exist_seq_all_samples = torch.cat([note_exist_seq_all_samples, note_exist_seq], dim=0)
-			note_dist_seq_all_samples = torch.cat([note_dist_seq_all_samples, note_dist_seq], dim=0)
-			pc_exist_seq_all_samples = torch.cat([pc_exist_seq_all_samples, pc_exist_seq], dim=0)
-			pc_dist_seq_all_samples = torch.cat([pc_dist_seq_all_samples, pc_dist_seq], dim=0)
-			chord_seq_all_samples = torch.cat([chord_seq_all_samples, chord_seq], dim=0)
-			root_seq_all_samples = torch.cat([root_seq_all_samples, root_seq], dim=0)
-			quality_seq_all_samples = torch.cat([quality_seq_all_samples, quality_seq], dim=0)
-			key_seq_all_samples = torch.cat([key_seq_all_samples, key_seq], dim=0)
-			rn_seq_all_samples = torch.cat([rn_seq_all_samples, rn_seq], dim=0)
-			song_idx_all_samples = torch.cat([song_idx_all_samples, song_idx_cur_song], dim=0)
-			sample_idx_in_song_all_samples = torch.cat([sample_idx_in_song_all_samples, sample_idx_in_song], dim=0)
-			qn_offset_cur_song_all_samples = torch.cat([qn_offset_cur_song_all_samples, qn_offset_cur_song], dim=0)
+			note_exist_frame_seq_all_samples = torch.cat([note_exist_frame_seq_all_samples, self.note_exist_frame_seq], dim=0)
+			self.sample_tensors.append(note_exist_frame_seq_all_samples)
+			
+			note_dur_frame_seq_all_samples = torch.cat([note_dur_frame_seq_all_samples, self.note_dur_frame_seq], dim=0)
+			self.sample_tensors.append(note_dur_frame_seq_all_samples)
+			
+			pc_exist_frame_seq_all_samples = torch.cat([pc_exist_frame_seq_all_samples, self.pc_exist_frame_seq], dim=0)
+			self.sample_tensors.append(pc_exist_frame_seq_all_samples)
+			
+			pc_dur_frame_seq_all_samples = torch.cat([pc_dur_frame_seq_all_samples, self.pc_dur_frame_seq], dim=0)
+			self.sample_tensors.append(pc_dur_frame_seq_all_samples)
+			
+			chord_frame_seq_all_samples = torch.cat([chord_frame_seq_all_samples, self.chord_frame_seq], dim=0)
+			self.sample_tensors.append(chord_frame_seq_all_samples)
 
-		self.sample_tensors = [note_exist_seq_all_samples, note_dist_seq_all_samples, pc_exist_seq_all_samples, pc_dist_seq_all_samples, chord_seq_all_samples, root_seq_all_samples, quality_seq_all_samples, key_seq_all_samples, rn_seq_all_samples, song_idx_all_samples, sample_idx_in_song_all_samples, qn_offset_cur_song_all_samples]
+			root_frame_seq_all_samples = torch.cat([root_frame_seq_all_samples, self.root_frame_seq], dim=0)
+			self.sample_tensors.append(root_frame_seq_all_samples)
+
+			quality_frame_seq_all_samples = torch.cat([quality_frame_seq_all_samples, self.quality_frame_seq], dim=0)
+			self.sample_tensors.append(quality_frame_seq_all_samples)
+
+			key_frame_seq_all_samples = torch.cat([key_frame_seq_all_samples, self.key_frame_seq], dim=0)
+			self.sample_tensors.append(key_frame_seq_all_samples)
+
+			key_tonic_frame_seq_all_samples = torch.cat([key_tonic_frame_seq_all_samples, self.key_tonic_frame_seq], dim=0)
+			self.sample_tensors.append(key_tonic_frame_seq_all_samples)
+
+			key_mode_frame_seq_all_samples = torch.cat([key_mode_frame_seq_all_samples, self.key_mode_frame_seq], dim=0)
+			self.sample_tensors.append(key_mode_frame_seq_all_samples)
+
+			rn_frame_seq_all_samples = torch.cat([rn_frame_seq_all_samples, self.rn_frame_seq], dim=0)
+			self.sample_tensors.append(rn_frame_seq_all_samples)
+			
+			pri_deg_frame_seq_all_samples = torch.cat([pri_deg_frame_seq_all_samples, self.pri_deg_frame_seq], dim=0)
+			self.sample_tensors.append(pri_deg_frame_seq_all_samples)
+
+			sec_deg_frame_seq_all_samples = torch.cat([sec_deg_frame_seq_all_samples, self.sec_deg_frame_seq], dim=0)
+			self.sample_tensors.append(sec_deg_frame_seq_all_samples)
+
+			inversion_frame_seq_all_samples = torch.cat([inversion_frame_seq_all_samples, self.inversion_frame_seq], dim=0)
+			self.sample_tensors.append(inversion_frame_seq_all_samples)
+
+			song_idx_all_samples = torch.cat([song_idx_all_samples, self.song_idx_cur_song], dim=0)
+			self.sample_tensors.append(song_idx_all_samples)
+
+			sample_idx_in_song_all_samples = torch.cat([sample_idx_in_song_all_samples, self.sample_idx_in_song], dim=0)
+			self.sample_tensors.append(sample_idx_in_song_all_samples)
+
+			qn_offset_cur_song_all_samples = torch.cat([qn_offset_cur_song_all_samples, self.qn_offset_cur_song], dim=0)
+			self.sample_tensors.append(qn_offset_cur_song_all_samples)
 
 	# Initialize the tensors to store the ground truth data
 	def initialize_tensors(self, num_sample):
 
 		# 88-dimensional one_hot vector for piano pitch appearance in each frame
-		note_exist_seq = torch.zeros(num_sample, self.sample_size, self.num_piano_pitch)
+		self.note_exist_frame_seq = torch.zeros(num_sample, self.sample_size, self.num_piano_pitch)
 
 		# 88-dimensional vector for piano pitch distribution in each frame
-		note_dist_seq = torch.zeros(num_sample, self.sample_size, self.num_piano_pitch)
+		self.note_dur_frame_seq = torch.zeros(num_sample, self.sample_size, self.num_piano_pitch)
 
 		# 12-dimensional one_hot vector for pitch class appearance in each frame
-		pc_exist_seq = torch.zeros(num_sample, self.sample_size, self.num_pc)
+		self.pc_exist_frame_seq = torch.zeros(num_sample, self.sample_size, self.num_pc)
 
 		# 12-dimensional vector for pitch class distribution in each frame
-		pc_dist_seq = torch.zeros(num_sample, self.sample_size, self.num_pc)
+		self.pc_dur_frame_seq = torch.zeros(num_sample, self.sample_size, self.num_pc)
 
 		# one chord label for each frame
-		chord_seq = torch.zeros(num_sample, self.sample_size)
+		self.chord_frame_seq = torch.zeros(num_sample, self.sample_size)
 
 		# one root label for each frame
-		root_seq = torch.zeros(num_sample, self.sample_size)
+		self.root_frame_seq = torch.zeros(num_sample, self.sample_size)
 
 		# one quality label for each frame
-		quality_seq = torch.zeros(num_sample, self.sample_size)
+		self.quality_frame_seq = torch.zeros(num_sample, self.sample_size)
 
 		# one key label for each frame
-		key_seq = torch.zeros(num_sample, self.sample_size)
+		self.key_frame_seq = torch.zeros(num_sample, self.sample_size)
+
+		# one key tonic label for each frame
+		self.key_tonic_frame_seq = torch.zeros(num_sample, self.sample_size)
+
+		# one key mode label for each frame
+		self.key_mode_frame_seq = torch.zeros(num_sample, self.sample_size)
+
+		# one primary degree label for each frame
+		self.pd_frame_seq = torch.zeros(num_sample, self.sample_size)
+
+		# one secondary degree label for each frame
+		self.sd_frame_seq = torch.zeros(num_sample, self.sample_size)
+
+		# one inversion label for each frame
+		self.inversion_frame_seq = torch.zeros(num_sample, self.sample_size)
 
 		# one rn label for each frame
-		rn_seq = torch.zeros(num_sample, self.sample_size)
+		self.rn_frame_seq = torch.zeros(num_sample, self.sample_size)
+
+		# one primary degree label for each frame
+		self.pri_deg_frame_seq = torch.zeros(num_sample, self.sample_size)
+
+		# one secondary degree label for each frame
+		self.sec_deg_frame_seq = torch.zeros(num_sample, self.sample_size)
+
+		# one inversion label for each frame
+		self.inversion_frame_seq = torch.zeros(num_sample, self.sample_size)
 
 		# the song index of the each sample
-		song_idx_cur_song = torch.zeros(num_sample)
+		self.song_idx_cur_song = torch.zeros(num_sample)
 
 		# the sample index in the song of the each sample
-		sample_idx_in_song = torch.zeros(num_sample)
+		self.sample_idx_in_song = torch.zeros(num_sample)
 
 		# the quarter note offset of the song of the each sample
-		qn_offset_cur_song = torch.zeros(num_sample)
-
-
-		return note_exist_seq, note_dist_seq, pc_exist_seq, pc_dist_seq, chord_seq, root_seq, quality_seq, key_seq, rn_seq, song_idx_cur_song, sample_idx_in_song, qn_offset_cur_song
+		self.qn_offset_cur_song = torch.zeros(num_sample)
 
 	# Update the tensors as new samples are created
-	def update_tensors(self, note_exist_seq, note_dist_seq, pc_exist_seq, pc_dist_seq, chord_seq, root_seq, quality_seq, key_seq, rn_seq, notes_frame, harmonies_frame, sample_idx, frame_idx):
+	def update_tensors(self, notes_frame, harmonies_frame, sample_idx, frame_idx):
 		
 		# Iterate through each note in the current frame
 		for note_cur in notes_frame:
 
-			# Update the feature tensors of notes
-			if note_exist_seq[sample_idx, frame_idx, note_cur.piano_pitch - 1] == 0:
-				note_exist_seq[sample_idx, frame_idx, note_cur.piano_pitch - 1] = 1
-			note_dist_seq[sample_idx, frame_idx, note_cur.piano_pitch - 1] += note_cur.duration
-			if pc_exist_seq[sample_idx, frame_idx, note_cur.pc] == 0:
-				pc_exist_seq[sample_idx, frame_idx, note_cur.pc] = 1
-			pc_dist_seq[sample_idx, frame_idx, note_cur.pc] += note_cur.duration
+			# Update the feature tensors related to notes and pitch classes
+			if self.note_exist_frame_seq[sample_idx, frame_idx, note_cur.piano_pitch - 1] == 0:
+				self.note_exist_frame_seq[sample_idx, frame_idx, note_cur.piano_pitch - 1] = 1
+			self.note_dur_frame_seq[sample_idx, frame_idx, note_cur.piano_pitch - 1] += note_cur.duration
+			if self.pc_exist_frame_seq[sample_idx, frame_idx, note_cur.pc] == 0:
+				self.pc_exist_frame_seq[sample_idx, frame_idx, note_cur.pc] = 1
+			self.pc_dur_frame_seq[sample_idx, frame_idx, note_cur.pc] += note_cur.duration
 
-		# Update the feature tensor of chords
+		# Update the feature tensors related to chords
 		harmony_frame = harmonies_frame[0]
-		chord_seq[sample_idx, frame_idx] = harmony_frame.this_chord.chord_index
-		root_seq[sample_idx, frame_idx] = harmony_frame.this_chord.root_pc
-		quality_seq[sample_idx, frame_idx] = harmony_frame.this_chord.quality_index
-		key_seq[sample_idx, frame_idx] = harmony_frame.roman_numeral.local_key.key_index
-		rn_seq[sample_idx, frame_idx] = harmony_frame.roman_numeral.rn_index
-		
-		if len(notes_frame) == 0:
-			note_exist_seq[sample_idx, frame_idx, self.num_piano_pitch - 1] = 1
-			note_dist_seq[sample_idx, frame_idx, self.num_piano_pitch - 1] = 1
-			pc_exist_seq[sample_idx, frame_idx, self.num_pc - 1] = 1
-			pc_dist_seq[sample_idx, frame_idx, self.num_pc - 1] = 1
-
-
-		return note_exist_seq, note_dist_seq, pc_exist_seq, pc_dist_seq, chord_seq, root_seq, quality_seq, key_seq, rn_seq
+		self.chord_frame_seq[sample_idx, frame_idx] = harmony_frame.this_chord.chord_index
+		self.root_frame_seq[sample_idx, frame_idx] = harmony_frame.this_chord.root_pc
+		self.quality_frame_seq[sample_idx, frame_idx] = harmony_frame.this_chord.quality_index
+		self.key_frame_seq[sample_idx, frame_idx] = harmony_frame.roman_numeral.local_key.key_index
+		self.key_tonic_frame_seq[sample_idx, frame_idx] = harmony_frame.roman_numeral.local_key.tonic_pc
+		self.key_mode_frame_seq[sample_idx, frame_idx] = harmony_frame.roman_numeral.local_key.mode_index
+		self.rn_frame_seq[sample_idx, frame_idx] = harmony_frame.roman_numeral.rn_index
+		self.pri_deg_frame_seq[sample_idx, frame_idx] = harmony_frame.roman_numeral.primary_degree_index
+		self.sec_deg_frame_seq[sample_idx, frame_idx] = harmony_frame.roman_numeral.secondary_degree_index
+		self.inversion_frame_seq[sample_idx, frame_idx] = harmony_frame.roman_numeral.inversion
 
 	# Split all the notes in a song into inter-onset regions (unit)
 	def notes2units(self, notes_all):

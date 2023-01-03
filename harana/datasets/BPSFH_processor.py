@@ -49,18 +49,23 @@ class BPSFHDataset(Dataset):
 
 	def __getitem__(self, index):
 		sample = {}
-		sample["note_exist_seq"] = self.sample_tensors[0][index]
-		sample["note_dist_seq"] = self.sample_tensors[1][index]
-		sample["pc_exist_seq"] = self.sample_tensors[2][index]
-		sample["pc_dist_seq"] = self.sample_tensors[3][index]
-		sample["chord_seq"] = self.sample_tensors[4][index]
-		sample["root_seq"] = self.sample_tensors[5][index]
-		sample["quality_seq"] = self.sample_tensors[6][index]
-		sample["key_seq"] = self.sample_tensors[7][index]
-		sample["rn_seq"] = self.sample_tensors[8][index]
-		sample["song_idx"] = self.sample_tensors[9][index]
-		sample["sample_idx_in_song"] = self.sample_tensors[10][index]
-		sample["qn_offset"] = self.sample_tensors[11][index]
+		sample["note_exist"] = self.sample_tensors[0][index]
+		sample["note_dur"] = self.sample_tensors[1][index]
+		sample["pc_exist"] = self.sample_tensors[2][index]
+		sample["pc_dur"] = self.sample_tensors[3][index]
+		sample["chord"] = self.sample_tensors[4][index]
+		sample["root"] = self.sample_tensors[5][index]
+		sample["quality"] = self.sample_tensors[6][index]
+		sample["key"] = self.sample_tensors[7][index]
+		sample["key_tonic"] = self.sample_tensors[8][index]
+		sample["key_mode"] = self.sample_tensors[9][index]
+		sample["rn"] = self.sample_tensors[10][index]
+		sample["pri_deg"] = self.sample_tensors[11][index]
+		sample["sec_deg"] = self.sample_tensors[12][index]
+		sample["inversion"] = self.sample_tensors[13][index]
+		sample["song_idx"] = self.sample_tensors[14][index]
+		sample["sample_idx_in_song"] = self.sample_tensors[15][index]
+		sample["qn_offset"] = self.sample_tensors[16][index]
 
 		return sample
 
