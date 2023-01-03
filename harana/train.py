@@ -26,15 +26,9 @@ def main(args_in):
 
 	parser.add_argument('--dataset', help="name of the dataset, ('BPSFH')", default="BPSFH", type=str)
 	
-<<<<<<< HEAD
 	parser.add_argument('--batch_size', help="number of samples in each batch", default = 96, type=int)
 	parser.add_argument('--sample_size', help="number of frames in each sample", default = 48, type=int)
 	parser.add_argument('--segment_max_len', help="max number of frames in a segment", default = 8, type=int)
-=======
-	parser.add_argument('--batch_size', help="number of samples in each batch", default=16, type=int)
-	parser.add_argument('--sample_size', help="number of frames in each sample", default=8, type=int)
-	parser.add_argument('--segment_max_len', help="max number of frames in a segment", default=8, type=int)
->>>>>>> a455594977a913192458b283e38c6c068d1b342d
 	
 	parser.add_argument('--frame_type', help="type of the representation to encode the basic time unit, ('inter_onset', 'fixed_size')", default="fixed_size", type=str)
 	parser.add_argument('--tpqn', help="number of ticks per quarter note", default=24, type=int)
@@ -42,21 +36,13 @@ def main(args_in):
 
 	parser.add_argument('--num_label', help="number of chord labels", default=120, type=int)
 
-<<<<<<< HEAD
 	parser.add_argument('--note_transform_type', help="type of the note transform, (none, cnn, dense_gru)", default = "dense_gru", type=str)
 	parser.add_argument('--chord_transform_type', help="type of the chord transform, (weight_vector, fc1, fc2)", default = "weight_vector", type=str)
 	parser.add_argument('--decode_type', help="type of the decoder, (softmax, nade, semi_crf)", default = "softmax", type=str)
 	parser.add_argument('--label_type', help="type of the chord label, (root_quality, key_rn)", default = "all", type=str)
 
 	parser.add_argument('--embedding_size', help="dimension size of the embedding", default = "64", type=int)
-=======
-	parser.add_argument('--note_transform_type', help="type of the note transform, (none, cnn, dense_gru)", default="none", type=str)
-	parser.add_argument('--chord_transform_type', help="type of the chord transform, (weight_vector, fc1, fc2)", default="fc1", type=str)
-	parser.add_argument('--decode_type', help="type of the decoder, (softmax, nade, semi_crf)", default="semi_crf", type=str)
-	parser.add_argument('--label_type', help="type of the chord label, (root_quality, key_rn)", default="root_quality", type=str)
 
-	parser.add_argument('--embedding_size', help="dimension size of the embedding", default="13", type=int)
->>>>>>> a455594977a913192458b283e38c6c068d1b342d
 
 	# Extract the information from the input arguments
 	args = parser.parse_args(args_in)

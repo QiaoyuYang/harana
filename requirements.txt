@@ -3,8 +3,4 @@ openpyxl
 torch
 tensorboard
 psutil
-<<<<<<< HEAD:requirement.txt
-
-=======
 tqdm
->>>>>>> a455594977a913192458b283e38c6c068d1b342d:requirements.txt
