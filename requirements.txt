@@ -1,0 +1,6 @@
+pandas
+openpyxl
+torch
+tensorboard
+psutil
+tqdm
