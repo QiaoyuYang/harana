@@ -1,12 +1,12 @@
 # Building the model
 
 # My import
-from ..utils import core, harmony, chord, key, rn
+from .. import tools
 from .semi_crf import SemiCRF
-from .densenet import DenseNet, TransitionBlock
-from .nade import BlockNADE
+from .densenet import DenseNet
 
 # Regular import
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -19,85 +19,24 @@ import torch.nn.functional as F
 ####################
 
 # Wrapper of the note encoder (Note context transform)
-class NoteContextTransform(nn.Module):
+class NoteEncoder(nn.Module):
 	'''
 	Init Arguments:
 		num_pc: 			number of pitch class
-		transform_type:		type of note context transformation
+		embedding_size:     size of the encoded embedding vector of each frame
+		drop_rate:          probability of dropping out a parameter in the module
 
 	'''
-	def __init__(self, num_pc, embedding_size, transform_type):
-		super(NoteContextTransform, self).__init__()
+	def __init__(self, embedding_size):
+		super(NoteEncoder, self).__init__()
 
 		# Initialize a DenseGRU module
-		self.dense_gru = DenseGRU(num_pc, embedding_size)
-
-		# Initialize a channel-wise 1d CNN module
-		self.cnn = CNN1d(num_pc)
-		
-		# A softmax layer to convert the frame-level embedding to a distribution-like vector
-		self.softmax = nn.Softmax(dim=2)
-		
-		self.transform_type = transform_type
-
-	def forward(self, x):
-
-		if self.transform_type == "none":
-			out = x
-		elif self.transform_type == "cnn":
-			out = self.cnn(x)
-		elif self.transform_type == "dense_gru":
-			out = self.dense_gru(x)
-
-		out = self.softmax(out)
-		
-		return out
-
-
-# A plain channel-wise 1D CNN module
-class CNN1d(nn.Module):
-	'''
-	Init Arguments:
-		num_pc: 			number of pitch class
-		in_planes: 			the number of input planes (planes with shape num_pc * sample_size)
-		out_planes: 		the number of input planes (planes with shape num_pc * sample_size), could be interpreted as the number of channel-wise conv1d filters of each block
-		kernel_size: 		length of the 1d kernel of each block (same for all the conv layers in each block)
-		bottleneck: 		whether to use the bottleneck layers, see more details in the BottleneckBlock class of densenet.py
-		drop_rate: 			the probability of elements in each input tensor to be zero
-
-	Note that all in_planes and out_planes are 1. This is the simple case where there is only single 1d filter in each conv layer.
-	More generally, the shapes are consistent as long as:
-		in_planes = 1
-		in_planes[k] = out_planes[k - 1]
-	'''
-	def __init__(self, num_pc, in_planes=[1, 1, 1], out_planes=[1, 1, 1], kernel_sizes=[3, 3, 3, 3], drop_rate=0.6):
-		super(CNN1d, self).__init__()
-		self.num_pc = num_pc
-		self.conv1 = TransitionBlock(num_pc, in_planes=in_planes[0], out_planes=out_planes[0], kernel_size=kernel_sizes[0], drop_rate=drop_rate)
-		self.conv2 = TransitionBlock(num_pc, in_planes=in_planes[1], out_planes=out_planes[1], kernel_size=kernel_sizes[1], drop_rate=drop_rate)
-		self.conv3 = TransitionBlock(num_pc, in_planes=in_planes[2], out_planes=out_planes[2], kernel_size=kernel_sizes[2], drop_rate=drop_rate)
-		self.relu = nn.ReLU(inplace=True)
+		self.dense_gru = DenseGRU(embedding_size=embedding_size, drop_rate=0.6)
 
 	def forward(self, x):
 		
-		# x.shape: (batch_size, sample_size, num_pc)
-		# Set the pitch class dimension before the time dimension, as this representation is used in torch.nn.Conv1d
-		# Need to unsqueeze the second to last dimension to set up the transformation to multiple planes as used in the channel-wise conv1d. 
-		out = x.permute(0, 2, 1).unsqueeze(-2)
-		# x.shape: (batch_size, num_pc, 1, sample_size)
-
-		out = self.conv1(out)
-		out = self.conv2(out)
-		out = self.conv3(out)
-		out = self.relu(out)
-		# x.shape: (batch_size, num_pc, 1, sample_size)
+		out = self.dense_gru(x)
 		
-		out = out.permute(0, 3, 1, 2)
-		# x.shape: (batch_size, sample_size, num_pc, 1)
-		
-		out = out.flatten(start_dim=2)
-		# x.shape: (batch_size, sample_size, num_pc)
-
 		return out
 
 
@@ -105,68 +44,49 @@ class CNN1d(nn.Module):
 class DenseGRU(nn.Module):
 	'''
 	Init Arguments:
-		num_pc: 			number of pitch class
-		block_depth: 		number of convolutional layers of each block
-		growth_rates: 		number filters of the convolutional layers in each block (same for all the conv layers in each block)
-		kernel_size: 		length of the 1d kernel of each block (same for all the conv layers in each block)
-		bottleneck: 		whether to use the bottleneck layers, see more details in the BottleneckBlock class of densenet.py
-		drop_rate: 			the probability of elements in each input tensor to be zero
-		gru_hidden_size: 	the dimension of hidden state output of GRU at each time step
+		drop_rate: 			probability of elements in each input tensor to be zero
+		gru_hidden_size: 	dimension of hidden state output of GRU at each time step
 
 	The parameter values follow the setup in Micchi et al, 2021
 	'''
-	def __init__(self, num_pc, embedding_size, block_depths=[3, 2, 2], growth_rates=[10, 4, 4], kernel_sizes=[7, 3, 3],
-                 bottleneck=True, drop_rate=0.6, gru_hidden_size=178):
+	def __init__(self, in_channels=tools.NUM_PC, block_depths=[3, 2, 2], growth_rates=[10, 4, 4], kernel_sizes=[7, 3, 3], \
+			bottleneck=True, gru_hidden_size=128, embedding_size=64, drop_rate=0.6):
 		super(DenseGRU, self).__init__()
 
 		# Initialize the DenseNet module
-		self.densenet = DenseNet(num_pc, block_depths, growth_rates, kernel_sizes, bottleneck, drop_rate)
+		self.densenet = DenseNet(in_channels=tools.NUM_PC, block_depths=[3, 2, 2], growth_rates=[10, 4, 4], kernel_sizes=[7, 3, 3], bottleneck=True, drop_rate=0.6)
 		
 		# The output embedding dimension of each frame after DenseNet
-		num_feature_after_densenet = num_pc * (block_depths[-1] + 1) * growth_rates[-1]
-		
+		feature_size_after_densenet = tools.NUM_PC + sum(pair[0] * pair[1] for pair in zip(block_depths, growth_rates))
+
 		# Initialize the GRU layer
-		self.gru = nn.GRU(input_size=num_feature_after_densenet, hidden_size=gru_hidden_size, batch_first=True)
-		self.gru_bn = nn.BatchNorm1d(num_feature_after_densenet)
+		self.gru = nn.GRU(input_size=feature_size_after_densenet, hidden_size=gru_hidden_size, batch_first=True)
+		self.gru_bn = nn.BatchNorm1d(gru_hidden_size)
 		
 		# Project the embedding size of each frame back to the number of pitch class
 		self.fc = nn.Linear(gru_hidden_size, embedding_size)
-		self.fc_bn = nn.BatchNorm1d(gru_hidden_size)
+		self.fc_bn = nn.BatchNorm1d(embedding_size)
 
 	def forward(self, x):
 		
-		# x.shape: (batch_size, sample_size, num_pc)
-		# Set the pitch class dimension before the time dimension, as this representation is used in torch.nn.Conv1d
-		out = x.permute(0, 2, 1).unsqueeze(-2)
 		# x.shape: (batch_size, num_pc, sample_size)
 		
-		out = self.densenet(out)
-		# out.shape: (batch_size, num_pc, num_feature_each_pc, sample_size)
+		out = self.densenet(x)
+		# out.shape: (batch_size, feature_size_after_densenet, sample_size)
 		
-		# Set the time dimension before feature dimensions, as this representation is used in torch.nn.GRU
-		out = out.permute(0, 3, 1, 2)
-		# out.shape: (batch_size, sample_size, num_pc, num_feature_each_pc)
-		
-		# Flatten the feature plane of each frame into a 1d vector
-		out = out.flatten(start_dim=2)
-		# out.shape: (batch_size, sample_size, num_feature_each_frame)
-
 		out = out.permute(0, 2, 1)
-		# out.shape: (batch_size, num_feature_each_frame, sample_size)
-		out = self.gru_bn(out)
-		out = out.permute(0, 2, 1)
-		# out.shape: (batch_size, sample_size, num_feature_each_frame)
+		# out.shape: (batch_size, sample_size, feature_size_after_densenet)
 
 		out, _ = self.gru(out)
 		# out.shape: (batch_size, sample_size, gru_hidden_size)
-
-		out = out.permute(0, 2, 1)
-		# out.shape: (batch_size, gru_hidden_size, sample_size)
-		out = self.fc_bn(out)
-		out = out.permute(0, 2, 1)
+		
+		out = self.gru_bn(out.permute(0, 2, 1)).permute(0, 2, 1)
 		# out.shape: (batch_size, sample_size, gru_hidden_size)
 
 		out = self.fc(out)
+		# out.shape: (batch_size, sample_size, embedding_size)
+
+		out = self.fc_bn(out.permute(0, 2, 1)).permute(0, 2, 1)
 		# out.shape: (batch_size, sample_size, embedding_size)
 
 		return out
@@ -175,88 +95,44 @@ class DenseGRU(nn.Module):
 
 
 #####################
-#   Chord Encoder   #
+#   Harmony Encoder   #
 #####################
 
-# Wrapper of the chord encoder (reweight the chordal pitch class vector based on scale degree)
-class ChordalPCWeightTransform(nn.Module):
+# Wrapper of the harmony encoder
+class HarmonyEncoder(nn.Module):
 	'''
 	Init Arguments:
-		num_label: 			number of chord labels
-		num_pc: 			number of pitch class
-		transform_type:		type of chordal pc weight transformation
-		device:				the device where the model is running
+		input_dim: 			dimension of input vector
+		embedding_size:     size of the encoded embedding vector of each frame
 	'''
-	def __init__(self, num_label, num_pc, embedding_size, chord_transform_type, device):
-		super(ChordalPCWeightTransform, self).__init__()
+	def __init__(self, harmony_type, device):
+		super(HarmonyEncoder, self).__init__()
 		
-		self.num_label = num_label
-		self.num_pc = num_pc
+		self.harmony_type = harmony_type
+		self.category_linear_proj = nn.ModuleList()
+
+		# The encoder is two stage
+		# First, create a separate linear projection for each component and concatenate the output
+		for component_dim_cur in tools.HARMONY_COMPONENT_DIMS[harmony_type]:
+			self.category_linear_proj.append(nn.Linear(component_dim_cur, component_dim_cur))
 		
-		'''
-		Three types of chord transform:
-			weight_vector: a single weight vector to be element-wise multiplied with the chordal pc vectors
-			fc1: one fully-connected layer
-			fc2: two fully-connected layer
-		'''
-		
-		# The weight vector is initialized to be approximately the importance of each scale degree
-		self.scale_degree_weight = nn.Parameter(torch.tensor([1, 0.01, 0.01, 0.9, 0.9, 0.01, 0.1, 0.8, 0.1, 0.1, 0.9, 0.7, 0]))
-		
-		self.self_linear = nn.Linear(num_pc, num_pc)
-		self.linear2embedding = nn.Linear(num_pc, embedding_size)
-		self.softmax = nn.Softmax(dim=2)
-		
-		self.chord_transform_type = chord_transform_type
+		# Second, use a single linear projection layer to transform the concatenated output to the embedding
+		self.combined_linear_proj = nn.Linear(tools.EMBEDDING_SIZE[harmony_type], tools.EMBEDDING_SIZE[harmony_type])
 		self.device = device
-
-	# Permute the pitch class vector
-	def permute_pc(self, chordal_pc_vector, mode):
-
-		# The variable to store the permuted chordal pc vectors
-		chordal_pc_vector_permuted = torch.tensor([])
-		chordal_pc_vector_permuted = chordal_pc_vector_permuted.to(self.device)
-
-		# Loop through all the chord labels
-		for label_idx in range(self.num_label):
-
-			# Get the root pc of the chord
-			root_pc, _ = chord.parse_chord_index(label_idx)
-
-			# Get the current chordal pc vector
-			chordal_pc_vector_cur = chordal_pc_vector[:, label_idx, :]
-
-			# If the target pc vector has the root pc at the first entry
-			if mode == "root_first":
-				chordal_pc_vector_permuted_cur = chordal_pc_vector_cur.roll(self.num_pc - 1 - root_pc, dims=1)
-			# If the target pc vector has the original order
-			elif mode == "original":
-				chordal_pc_vector_permuted_cur = chordal_pc_vector_cur.roll(root_pc, dims=1)
-			
-			# Stach each permuted chordal pc vector at the num_label dimension
-			chordal_pc_vector_permuted = torch.cat([chordal_pc_vector_permuted, chordal_pc_vector_permuted_cur[:, None, :]], dim=1)
-		
-		return chordal_pc_vector_permuted
 	
-	def forward(self, chordal_pc_vector):
+	def forward(self, harmony_vector):
+		out = torch.empty_like(harmony_vector)
+		out = out.to(self.device)
 
-		# chordal_pc_vector.shape: (num_label, num_pc)
-		out = self.permute_pc(chordal_pc_vector, mode="root_first")
-		# out.shape: (num_label, num_pc) and remains the same in the following steps
-
-		if self.chord_transform_type == "None":
-			out = out
-		elif self.chord_transform_type == "weight_vector":
-			out = out * self.scale_degree_weight
-		elif self.chord_transform_type == "fc1":
-			out = self.linear2embedding(out)
-		elif self.chord_transform_type == "fc1":
-			out = self.self_linear(out)
-			out = self.linear2embedding(out)
+		cum_component_dim = 0
+		for i, component_dim_cur in enumerate(tools.HARMONY_COMPONENT_DIMS[self.harmony_type]):
+			component_cur_start = cum_component_dim
+			component_cur_end = component_cur_start + component_dim_cur
+			out[:, :, component_cur_start : component_cur_end] = \
+				self.category_linear_proj[i](harmony_vector[:, :, component_cur_start:component_cur_end])
+		cum_component_dim += component_dim_cur
 		
-		out = self.permute_pc(out, mode="original")
-		
-		out = self.softmax(out)
+		out = self.combined_linear_proj(out)
 		
 		return out
 
@@ -267,103 +143,84 @@ class ChordalPCWeightTransform(nn.Module):
 
 # Wrapper to compute the score for each segment
 class SegmentScore(nn.Module):
-	def __init__(self, batch_size, sample_size, num_label, num_pc, embedding_size, chord_transform_type, device):
+	def __init__(self, batch_size, harmony_type, device):
 		super(SegmentScore, self).__init__()
 		
 		self.batch_size = batch_size
-		self.sample_size = sample_size
-		self.num_label = num_label
-		self.num_pc = num_pc
-
+		self.harmony_type = harmony_type
 		self.device = device
 
-		# Initialize the chordal pc weight transform module
-		self.chordal_pc_weight_transform = ChordalPCWeightTransform(self.num_label, self.num_pc, embedding_size, chord_transform_type, self.device)
+		# Initialize the harmony transform module
+		self.harmony_encoder = HarmonyEncoder(harmony_type, self.device)
 
-		# Initialize the chordal pc vectors
-		self.chordal_pc_vector = torch.zeros(self.num_label, self.num_pc, requires_grad=False)
-		self.compute_chordal_pc_vector()
-		self.chordal_pc_vector = self.chordal_pc_vector.to(self.device)
+		# Initialize the harmony vectors
+		self.harmony_vector = torch.zeros(tools.NUM_HARMONIES[harmony_type], tools.EMBEDDING_SIZE[harmony_type], requires_grad=False)
+		self.compute_harmony_vector()
+		self.harmony_vector = self.harmony_vector.to(self.device)
 
-		'''
-		self.chord_prior = torch.zeros(self.num_label)
-		self.init_chord_prior()
-		self.chord_prior = nn.Parameter(self.chord_prior)
-		self.chordal_prior = self.chord_prior.to(device)
-		'''
+		# Initialize the cross attention module of the query harmony embedding to the note embedding
+		self.harmony_note_attention = ScaledDotProductAttention(tools.EMBEDDING_SIZE[harmony_type])
 
-		# Initialize the cross attention module of the query chord labels to the note embedding
-		self.chord_note_attention = ScaledDotProductAttention(self.num_pc)
+	# Compute the input vecotr for all harmony labels
+	def compute_harmony_vector(self):
 
-	# Compute the chordal pc vector for all chords
-	def compute_chordal_pc_vector(self):
+		# Loop through all harmony labels
+		for harmony_index in range(tools.NUM_HARMONIES[self.harmony_type]):
 
-		# Loop through chord labels
-		for label_idx in range(self.num_label - 1):
-
-			# Update the chordal pc vector for the chord
-			self.chordal_pc_vector[label_idx, :] = self.compute_chordal_pc_vector_single(label_idx)
+			# Update the corresponding harmony vector
+			self.compute_harmony_vector_single(harmony_index)
 		
-		# Repeat the chordal pc vectors for each sample in the batch for parallel processing
-		self.chordal_pc_vector = self.chordal_pc_vector.unsqueeze(0).repeat(self.batch_size, 1, 1)
+		# Repeat the harmony vector for each sample in the batch for parallel processing
+		self.harmony_vector = self.harmony_vector.unsqueeze(0).repeat(self.batch_size, 1, 1)
 
-	# Compute the chordal pc vector for a single chord
-	def compute_chordal_pc_vector_single(self, label_idx):
+	# Compute the input vector for a single harmony labels
+	def compute_harmony_vector_single(self, harmony_index):
 
-		# Extract the chordal pc of the chord
-		chordal_pc = chord.chord_index2chordal_pc(label_idx)		
+		# Extract the index of components of the harmony
+		component_indexes = tools.Harmony.parse_harmony_index(harmony_index, self.harmony_type)		
 
-		# Create a 1-hot vector for the chordal pc
-		chordal_pc_vector = torch.zeros(self.num_pc, 1)
-		for pitch_class in range(self.num_pc):
-			if pitch_class in chordal_pc:
-				chordal_pc_vector[pitch_class, 0] = 1
-
-		# Normalize the vectors to be distribution-like
-		return chordal_pc_vector.squeeze(-1) / chordal_pc_vector.sum()
-
+		cum_component_dim = 0
+		for i, component_dim_cur in enumerate(tools.HARMONY_COMPONENT_DIMS[self.harmony_type]):
+			self.harmony_vector[harmony_index, cum_component_dim + component_indexes[i]] = 1
+			cum_component_dim += component_dim_cur
 	
-	# Compute the segment score for all segments (with all chord labels)
-	# Since the computation is the same for all chord labels, we parallelize across them
-	def compute_segment_score(self, pc_embedding_seq):
-		chordal_pc_embedding = self.chordal_pc_weight_transform(self.chordal_pc_vector)
+	# Compute the segment score for all segments (with all harmony labels)
+	# Since the computation is the same for all harmony labels, we parallelize across them
+	def compute_segment_score(self, note_embedding_seq, harmony_embedding):
+		harmony_embedding = self.harmony_encoder(self.harmony_vector)
 		
 		# The variable to store all the segment scores
-		segment_score = torch.zeros(self.batch_size, self.sample_size, self.sample_size, self.num_label)
+		segment_score = torch.zeros(self.batch_size, tools.FRAMES_PER_SAMPLE, tools.FRAMES_PER_SAMPLE, tools.NUM_HARMONIES[self.harmony_type])
 		segment_score = segment_score.to(self.device)
 
 
 		# Loop through start_frame
-		for start_frame in range(self.sample_size):
+		for start_frame in range(tools.FRAMES_PER_SAMPLE):
 			# Loop through end_frame
-			for end_frame in range(start_frame, self.sample_size):
+			for end_frame in range(start_frame, tools.FRAMES_PER_SAMPLE):
 
 				# Update the segment scores of the current segment boundary
-				segment_score[:, start_frame, end_frame, :] = self.compute_segment_score_single(pc_embedding_seq[:, start_frame : end_frame + 1, :], chordal_pc_embedding)
+				segment_score[:, start_frame, end_frame, :] = self.compute_segment_score_single(note_embedding_seq[:, start_frame : end_frame + 1, :], harmony_embedding)
 
 		return segment_score
-	
 
 	# Compute the segment score for a single segment (with all chord labels)
-	def compute_segment_score_single(self, pc_embedding_seq_segment, chordal_pc_embedding):
+	def compute_segment_score_single(self, note_embedding_seq_segment, harmony_embedding):
 
 		# Compute the attended note embedding of the segment
-		attended_pc_embedding, attention = self.chord_note_attention(chordal_pc_embedding, pc_embedding_seq_segment, pc_embedding_seq_segment, mask=None)
+		attended_note_embedding, attention = self.harmony_note_attention(harmony_embedding, note_embedding_seq_segment, note_embedding_seq_segment, mask=None)
 
 		# compute the segment score
-		segment_score_single = (chordal_pc_embedding * attended_pc_embedding).sum(-1)
-		
-		#segment_score_single = segment_score_single.mul(self.chord_prior)
+		segment_score_single = (harmony_embedding * attended_note_embedding).sum(-1)
 		
 		return segment_score_single
 
-	def forward(self, pc_embedding_seq):
-		
+	def forward(self, note_embedding_seq):
 		# Compute the chord pc weight
-		self.chordal_pc_weight = self.chordal_pc_weight_transform(self.chordal_pc_vector)
+		harmony_embedding = self.harmony_encoder(self.harmony_vector)
 
 		# Compute the segment score
-		segment_score = self.compute_segment_score(pc_embedding_seq)
+		segment_score = self.compute_segment_score(note_embedding_seq, harmony_embedding)
 		
 		return segment_score
 
@@ -403,88 +260,47 @@ class ScaledDotProductAttention(nn.Module):
 #   Decoder   #
 ###############
 
-label_type2categories = {
-	"root_quality" : ["root", "quality"],
-	"key_rn" : ["key", "rn"],
-	"all" : ["key_tonic", "key_mode", "pri_deg", "sec_deg", "root", "quality", "inversion"]
-}
+class LinearDecoder(nn.Module):
 
-class SoftmaxDecoder(nn.Module):
+	def __init__(self, harmony_type):
+		super(LinearDecoder, self).__init__()
 
-	def __init__(self, embedding_size, label_type):
-		super(SoftmaxDecoder, self).__init__()
+		self.linear_heads = nn.ModuleList()
+		self.harmony_type = harmony_type
+		# A separate decoder for each component
+		for component_dim_cur in tools.HARMONY_COMPONENT_DIMS[harmony_type]:
+			self.linear_heads.append(nn.Linear(component_dim_cur, component_dim_cur))
 
-		self.label_type = label_type
+	def forward(self, note_embedding):
 		
-		if self.label_type == "root_quality":
-			self.root_head = nn.Linear(embedding_size, core.num_pc)
-			self.root_head_bn = nn.BatchNorm1d(embedding_size)
-			self.quality_head = nn.Linear(embedding_size, core.num_quality)
-			self.quality_head_bn = nn.BatchNorm1d(embedding_size)
-		if self.label_type == "key_rn":
-			self.key_head = nn.Linear(embedding_size, key.num_key)
-			self.key_head_bn = nn.BatchNorm1d(embedding_size)
-			self.rn_head = nn.Linear(embedding_size, rn.num_rn)
-			self.rn_head_bn = nn.BatchNorm1d(embedding_size)
-		if self.label_type == "all":
-			self.key_tonic_head = nn.Linear(embedding_size, key.num_tonic)
-			self.key_tonic_head_bn = nn.BatchNorm1d(embedding_size)
-			self.key_mode_head = nn.Linear(embedding_size, key.num_mode)
-			self.key_mode_head_bn = nn.BatchNorm1d(embedding_size)
-			self.pri_deg_head = nn.Linear(embedding_size, rn.num_primary_degree)
-			self.pri_deg_head_bn = nn.BatchNorm1d(embedding_size)
-			self.sec_deg_head = nn.Linear(embedding_size, rn.num_secondary_degree)
-			self.sec_deg_head_bn = nn.BatchNorm1d(embedding_size)
-			self.root_head = nn.Linear(embedding_size, core.num_pc)
-			self.root_head_bn = nn.BatchNorm1d(embedding_size)
-			self.quality_head = nn.Linear(embedding_size, core.num_quality)
-			self.quality_head_bn = nn.BatchNorm1d(embedding_size)
-			self.inversion_head = nn.Linear(embedding_size, harmony.num_inversion)
-			self.inversion_head_bn = nn.BatchNorm1d(embedding_size)
-		self.softmax = nn.Softmax(dim=2)
-
-	def forward(self, pc_embedding):
-		decode_prob = {}
+		head_output = dict()
+		cum_component_dim = 0
+		for i, component_dim_cur in enumerate(tools.HARMONY_COMPONENT_DIMS[self.harmony_type]):
+			head_output[tools.HARMONY_COMPONENTS[self.harmony_type][i]] = self.linear_heads[i](note_embedding[:, :, cum_component_dim : cum_component_dim + component_dim_cur])
+			cum_component_dim += component_dim_cur
 		
-		if self.label_type == "root_quality":
-			decode_prob["root"] = self.softmax(self.root_head(pc_embedding))
-			decode_prob["quality"] = self.softmax(self.quality_head(pc_embedding))
-		if self.label_type == "key_rn":
-			decode_prob["key"] = self.softmax(self.key_head(pc_embedding))
-			decode_prob["rn"] = self.softmax(self.rn_head(pc_embedding))
-		if self.label_type == "all":
-			decode_prob["key_tonic"] = self.softmax(self.key_tonic_head(self.key_tonic_head_bn(pc_embedding.permute(0, 2, 1)).permute(0, 2, 1)))
-			decode_prob["key_mode"] = self.softmax(self.key_mode_head(self.key_mode_head_bn(pc_embedding.permute(0, 2, 1)).permute(0, 2, 1)))
-			decode_prob["pri_deg"] = self.softmax(self.pri_deg_head(self.pri_deg_head_bn(pc_embedding.permute(0, 2, 1)).permute(0, 2, 1)))
-			decode_prob["sec_deg"] = self.softmax(self.sec_deg_head(self.sec_deg_head_bn(pc_embedding.permute(0, 2, 1)).permute(0, 2, 1)))
-			decode_prob["root"]= self.softmax(self.root_head(self.root_head_bn(pc_embedding.permute(0, 2, 1)).permute(0, 2, 1)))
-			decode_prob["quality"] = self.softmax(self.quality_head(self.quality_head_bn(pc_embedding.permute(0, 2, 1)).permute(0, 2, 1)))
-			decode_prob["inversion"] = self.softmax(self.inversion_head(self.inversion_head_bn(pc_embedding.permute(0, 2, 1)).permute(0, 2, 1)))
-		
-		return decode_prob
+		return head_output
 
 # Wrapper for the decoder
 class Decoder(nn.Module):
-	def __init__(self, decode_type, label_type, batch_size, sample_size, num_label, num_pc, segment_max_len, device, chord_transform_type, embedding_size):
+	def __init__(self, batch_size, segment_max_len, harmony_type, decode_type, device):
 		super(Decoder, self).__init__()
 
 		self.batch_size = batch_size
+		self.harmony_type = harmony_type
 		self.decode_type = decode_type
-		self.label_type = label_type
 		self.device = device
 
-		self.pc_embedding = torch.zeros(batch_size, sample_size, embedding_size)
-		self.pc_embedding = self.pc_embedding.to(self.device)
+		self.note_embedding = torch.zeros(batch_size, tools.FRAMES_PER_SAMPLE, tools.EMBEDDING_SIZE[harmony_type])
+		self.note_embedding = self.note_embedding.to(self.device)
 
-		self.segment_score = SegmentScore(self.batch_size, sample_size, num_label, num_pc, embedding_size, chord_transform_type, self.device)
-		transition_importance = 0.001 / (sample_size - 1)
-		self.semicrf = SemiCRF(self.batch_size, sample_size, num_label, segment_max_len, self.device, transition_importance)
+		self.segment_score = SegmentScore(batch_size, harmony_type, device)
+		transition_importance = 0.001 / (tools.FRAMES_PER_SAMPLE - 1)
+		self.semicrf = SemiCRF(batch_size, tools.NUM_HARMONIES[harmony_type], segment_max_len, transition_importance, device)
 
-		self.softmax_decoder = SoftmaxDecoder(embedding_size, label_type)
+		self.linear_decoder = LinearDecoder(harmony_type)
+		self.softmax = nn.Softmax(dim=2)
 		self.cross_entropy_loss = nn.CrossEntropyLoss()
-
-		#label_dim = {'key': 24, 'tonocisation': 7, 'degree': 7, 'quality':12, 'inversion': 4, 'root': 24}
-		#self.nade = BlockNADE(embedding_size=num_pc, visible_dim_list=[24, 7, 7, 12, 4, 24], hidden_dim=350)
 
 	def decode(self):
 		
@@ -493,20 +309,20 @@ class Decoder(nn.Module):
 			return self.semicrf.decode()
 
 		if self.decode_type == "softmax":
-			decode_prob = self.softmax_decoder(self.pc_embedding)
+			head_output = self.linear_decoder(self.note_embedding)
 			
-			for category in label_type2categories[self.label_type]:
-				decode_result[category] = decode_prob[category].argmax(dim=2)
+			for component in tools.HARMONY_COMPONENTS[self.harmony_type]:
+				decode_result[component] = self.softmax(head_output[component]).argmax(dim=2)
 			
 			return decode_result
 
-	def compute_loss_semi_crf(self, chord_gt, key_gt, rn_gt):
+	def compute_loss_semi_crf(self, harmony_index_gt):
 
 		print("Computing segment score")
-		self.semicrf.segment_score = self.segment_score(self.pc_embedding)
+		self.semicrf.segment_score = self.segment_score(self.note_embedding)
 			
 		print("Computing path score")
-		path_score = self.semicrf.compute_path_score(chord_gt)
+		path_score = self.semicrf.compute_path_score(harmony_index_gt)
 
 		transition_weight_L2_loss = self.semicrf.transitions.flatten().square().sum()
 			
@@ -517,19 +333,14 @@ class Decoder(nn.Module):
 			
 		return nll + transition_weight_L2_loss
 
-	def compute_loss_cross_entropy(self, root_gt, quality_gt, key_tonic_gt, key_mode_gt, pri_deg_gt, sec_deg_gt, inversion_gt):
+	def compute_loss_cross_entropy(self, harmony_component_gt):
 
-		decode_prob = self.softmax_decoder(self.pc_embedding)
-
-		root_loss = self.cross_entropy_loss(decode_prob["root"].permute(0, 2, 1), root_gt.long())
-		quality_loss = self.cross_entropy_loss(decode_prob["quality"].permute(0, 2, 1), quality_gt.long())
-		key_tonic_loss = self.cross_entropy_loss(decode_prob["key_tonic"].permute(0, 2, 1), key_tonic_gt.long())
-		key_mode_loss = self.cross_entropy_loss(decode_prob["key_mode"].permute(0, 2, 1), key_mode_gt.long())
-		pri_deg_loss = self.cross_entropy_loss(decode_prob["pri_deg"].permute(0, 2, 1), pri_deg_gt.long())
-		sec_deg_loss = self.cross_entropy_loss(decode_prob["sec_deg"].permute(0, 2, 1), sec_deg_gt.long())
-		inversion_loss = self.cross_entropy_loss(decode_prob["inversion"].permute(0, 2, 1), inversion_gt.long())
+		head_output = self.linear_decoder(self.note_embedding)
+		loss = 0
+		for i, component in enumerate(tools.HARMONY_COMPONENTS[self.harmony_type]):
+			loss += self.cross_entropy_loss(head_output[component].permute(0, 2, 1), harmony_component_gt[:, i, :].long())
 			
-		return root_loss + quality_loss + key_tonic_loss + key_mode_loss + pri_deg_loss + sec_deg_loss + inversion_loss
+		return loss
 
 
 
@@ -541,84 +352,46 @@ class Decoder(nn.Module):
 
 # Wrapper for the complete model
 class ModelComplete(nn.Module):
-	def __init__(self, batch_size, sample_size, segment_max_len, num_label, note_transform_type, chord_transform_type, decode_type, label_type, embedding_size, device):
+	def __init__(self, batch_size, segment_max_len, harmony_type, decode_type, device):
 		super(ModelComplete, self).__init__()
-
-		self.batch_size = batch_size
+		
+		self.harmony_type = harmony_type
 		self.decode_type = decode_type
-		self.label_type = label_type
-		self.embedding_size = embedding_size
 		self.device = device
 		
-		self.num_pc = 12
-		
 		# Initialize the note context transform module
-		self.note_context_transform = NoteContextTransform(self.num_pc, self.embedding_size, note_transform_type)
-		self.decoder = Decoder(self.decode_type, self.label_type, batch_size, sample_size, num_label, self.num_pc, segment_max_len, self.device, chord_transform_type, embedding_size)
+		self.note_encoder = NoteEncoder(tools.EMBEDDING_SIZE[harmony_type])
+		self.decoder = Decoder(batch_size, segment_max_len, harmony_type, decode_type, device)
 	
 	def get_loss(self, batch):
 		return self.forward(batch)
 
 	def forward(self, batch):
-		self.decoder.segment_score.chordal_pc_vector.detach_()
+		self.decoder.segment_score.harmony_vector.detach_()
+		self.decoder.semicrf.segment_score.detach_()
 		
-		pc_exist = batch["pc_exist"]
-		pc_dur = batch["pc_dur"]
-		chord_gt = batch["chord"]
-		root_gt = batch["root"]
-		quality_gt = batch["quality"]
-		key_gt = batch["key"]
-		key_tonic_gt = batch["key_tonic"]
-		key_mode_gt = batch["key_mode"]
-		rn_gt = batch["rn"]
-		pri_deg_gt = batch["pri_deg"]
-		sec_deg_gt = batch["sec_deg"]
-		inversion_gt = batch["inversion"]
+		pc_act = batch[tools.KEY_PC_ACT].float()
+		chord_index_gt = batch[tools.KEY_CHORD_INDEX_GT]
+		rn_index_gt = batch[tools.KEY_RN_INDEX_GT]
+		chord_component_gt = batch[tools.KEY_CHORD_COMPONENT_GT].float()
+		rn_component_gt = batch[tools.KEY_RN_COMPONENT_GT].float()
 
-		pc_exist = pc_exist.to(self.device)
-		pc_dur = pc_dur.to(self.device)
-		chord_gt = chord_gt.to(self.device)
-		root_gt = root_gt.to(self.device)
-		quality_gt = quality_gt.to(self.device)
-		key_gt = key_gt.to(self.device)
-		key_tonic_gt = key_tonic_gt.to(self.device)
-		key_mode_gt = key_mode_gt.to(self.device)
-		rn_gt = rn_gt.to(self.device)
-		pri_deg_gt = pri_deg_gt.to(self.device)
-		sec_deg_gt = sec_deg_gt.to(self.device)
-		inversion_gt = inversion_gt.to(self.device)
-
-
-		'''
-		song_idx = batch["song_idx"]
-		sample_idx_in_song = batch["sample_idx_in_song"]
-		qn_offset = batch["qn_offset"]
-		sample_idx = 3
-		sample_idx_in_song_cur = sample_idx_in_song[sample_idx]
-		print(f"song index: {song_idx[sample_idx]}")
-
-		sample_size = 48
-		fpqn = 4
-		qnps = sample_size / fpqn
-
-		start_qn = qnps * sample_idx_in_song_cur
-		end_qn = start_qn + qnps - 1
-
-		print(f"start_qn: {start_qn}")
-		print(f"end_qn: {end_qn}")
-		print(f"chord_frame_seq: {chord_frame_seq[sample_idx]}")
-
-		print(f"pc_exist_frame 1: {pc_exist_frame_seq[sample_idx, 0, :]}")
-		print(f"pc_dur_frame 1: {pc_dur_frame_seq[sample_idx, 0, :]}")
-		'''
-		pc_embedding = self.note_context_transform(pc_exist)
-
-		self.decoder.pc_embedding = pc_embedding
+		pc_act = pc_act.to(self.device)
 		
+		if self.harmony_type == tools.HARMONY_TYPE_CHORD:
+			harmony_index_gt = chord_index_gt
+			harmony_component_gt = chord_component_gt
+		elif self.harmony_type == tools.HARMONY_TYPE_RN:
+			harmony_index_gt = rn_index_gt
+			harmony_component_gt = rn_component_gt
+
+		note_embedding = self.note_encoder(pc_act)
+
+		self.decoder.note_embedding = note_embedding
 		if self.decode_type == "softmax":
-				return self.decoder.compute_loss_cross_entropy(root_gt, quality_gt, key_tonic_gt, key_mode_gt, pri_deg_gt, sec_deg_gt, inversion_gt)
+			return self.decoder.compute_loss_cross_entropy(harmony_component_gt)
 		if self.decode_type == "semi_crf":
-			return self.decoder.compute_loss_semi_crf(chord_gt, key_gt, rn_gt)
+			return self.decoder.compute_loss_semi_crf(harmony_index_gt)
 
 
 
