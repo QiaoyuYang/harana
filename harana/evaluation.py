@@ -85,7 +85,7 @@ class Evaluator:
 		elif self.decode_type == 'softmax':
 			for i, component in enumerate(tools.HARMONY_COMPONENTS[self.harmony_type]):
 				# Compute the accuracy of each sample
-				sample_acc = (harmony_component_gt[:, i, :] == decode_result[component]).sum(dim=1) / tools.FRAMES_PER_SAMPLE
+				sample_acc = (harmony_component_gt[:, i, :] == decode_result[component].to('cpu')).sum(dim=1) / tools.FRAMES_PER_SAMPLE
 				# Then average across samples in the batch
 				acc[component] = sample_acc.sum() / self.batch_size
 

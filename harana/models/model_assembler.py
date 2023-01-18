@@ -334,7 +334,7 @@ class Decoder(nn.Module):
 		return nll + transition_weight_L2_loss
 
 	def compute_loss_cross_entropy(self, harmony_component_gt):
-
+		harmony_component_gt = harmony_component_gt.to(self.device)
 		head_output = self.linear_decoder(self.note_embedding)
 		loss = 0
 		for i, component in enumerate(tools.HARMONY_COMPONENTS[self.harmony_type]):

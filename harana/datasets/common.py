@@ -16,6 +16,7 @@ from abc import abstractmethod
 import torch
 from torch.utils.data import Dataset
 
+
 class HarmonyDataset(Dataset):
 	
 	# A generic class for harmony datasets
@@ -118,10 +119,24 @@ class HarmonyDataset(Dataset):
 			# Load the track's ground-truth
 			data = self.load(track_id)
 
+		# TODO - add this back in, otherwise no way to obtain full ground-truth
+		"""
+		# Check to see if a specific frame length was given
+        if frames_per_sample is None:
+            if self.frames_per_sample is not None:
+                # If not, use the default if available
+                frames_per_sample = self.frames_per_sample
+            else:
+                # Otherwise, assume full track is desired
+                return data
+		"""
+
 		if frame_start is None:
 			# If a specific starting frame was not provided, sample one randomly
 			frame_start = self.rng.randint(0, data[tools.KEY_PC_ACT].shape[-1] - tools.FRAMES_PER_SAMPLE)
+
 		if snap_to_measure:
+			# TODO - revisit solutions I proposed in Slack to fix this
 			# Compute the amount of frames a single measure spans
 			frames_per_measure = tools.FRAMES_PER_QUARTER * data[tools.KEY_METER].get_measure_length()
 			# Make sure the sampled frame start corresponds to the start of a measure
@@ -138,6 +153,19 @@ class HarmonyDataset(Dataset):
 				data[key] = data[key][..., frame_start : frame_stop]
 
 		return data
+
+	@abstractmethod
+	def get_tracks(self, split):
+		"""
+		Get the tracks associated with a dataset partition.
+
+		Parameters
+		----------
+		split : string
+		Name of the partition from which to fetch tracks
+		"""
+
+		return NotImplementedError
 
 	@abstractmethod
 	def load(self, track):
@@ -170,6 +198,8 @@ class HarmonyDataset(Dataset):
 			# Initialize a new dictionary if there is no saved data
 			data = dict()
 		else:
+			# TODO - make sure this works - can't find a reference to NON_ARRAY_KEYS, but
+			#        I'm pretty sure it refers to KEY_TRACK, KEY_OFFSET, and KEY_METER
 			for key in tools.NON_ARRAY_KEYS:
 				if key in data.keys and data[key].dtype == object:
 					data[key] = data[key].item()
@@ -180,10 +210,9 @@ class HarmonyDataset(Dataset):
 
 		# Initialize arrays to hold frame-level pitch activity and distribution
 		pitch_activity = np.zeros((tools.NUM_PIANO_KEYS, num_frames))
-		pitch_distr = pitch_activity.copy()
 
 		for note in notes:
-			# Adjust the onset and offset tick based on the pre-measureticks
+			# Adjust the onset and offset tick based on the pre-measure ticks
 			adjusted_onset_tick = note.onset - tick_offset_frame
 			adjusted_offset_tick = note.get_offset() - tick_offset_frame
 			# Determine the frames where the note begins and ends
@@ -192,9 +221,6 @@ class HarmonyDataset(Dataset):
 
 			# Account for the pitch activity of the note
 			pitch_activity[note.get_key_index(), frame_onset : frame_offset + 1] = 1
-
-		# Determine which frames contain pitch activity
-		active_frames = np.sum(pitch_activity, axis=0) > 0
 
 		# Construct an empty array of activations to complete the first octave
 		out_of_bounds_pitches = np.zeros((tools.NUM_PC - tools.NUM_PIANO_KEYS % tools.NUM_PC, num_frames))
@@ -237,24 +263,70 @@ class HarmonyDataset(Dataset):
 
 			# Update component index vector
 			for i in range(tools.NUM_CHORD_COMPONENTS):
-				chord_component_gt[i, frame_onset : frame_offset + 1] = 1
+				chord_component_gt[i, frame_onset : frame_offset + 1] = chord_component_indexes_cur[i]
 
 			for i in range(tools.NUM_RN_COMPONENTS):
-				rn_component_gt[i, frame_onset : frame_offset + 1] = 1
+				rn_component_gt[i, frame_onset : frame_offset + 1] = rn_component_indexes_cur[i]
 
 		return chord_index_gt, rn_index_gt, chord_component_gt, rn_component_gt
 
-	@abstractmethod
-	def get_tracks(self, split):
+	def get_gt_path(self, track=None):
 		"""
-		Get the tracks associated with a dataset partition.
-		Parameters
-		----------
-		split : string
-		Name of the partition from which to fetch tracks
+        Get the path for the ground-truth directory or a track's ground-truth.
+
+        Parameters
+        ----------
+        track : string or None
+          Append a track to the directory for the track's ground-truth path
+
+        Returns
+        ----------
+        path : string
+          Path to the ground-truth directory or a specific track's ground-truth
+        """
+
+		# Get the path to the ground truth directory
+		path = os.path.join(self.save_loc, self.dataset_name())
+
+		if track is not None:
+			# Add the track name and the .npz extension to the path
+			path = os.path.join(path, f'{track}.{tools.NPZ_EXT}')
+
+		return path
+
+	@staticmethod
+	def available_splits():
 		"""
+        Obtain a list of possible splits.
+        """
 
 		return NotImplementedError
 
+	@classmethod
+	def dataset_name(cls):
+		"""
+		Retrieve an appropriate tag, the class name, for the dataset.
 
+		Returns
+		----------
+		tag : str
+		  Name of the child class calling the function
+		"""
 
+		tag = cls.__name__
+
+		return tag
+
+	@staticmethod
+	@abstractmethod
+	def download(save_dir):
+		"""
+		Download the dataset to disk.
+
+		Parameters
+		----------
+		save_dir : string
+		  Directory under which to save the dataset
+		"""
+
+		return NotImplementedError

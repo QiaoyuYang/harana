@@ -1,6 +1,8 @@
 import os
 import numpy as np
 
+# TODO - clean up this file
+
 __all__ = [
     'HOME',
     'ROOT_DIR',
@@ -85,6 +87,7 @@ XLSX_EXT = 'xlsx'
 KEY_TRACK = 'track'
 
 KEY_PC_ACT = 'pitch_class_activity'
+KEY_PC_DST = 'pitch_class_distr' # TODO - unused
 
 KEY_CHORD_INDEX_GT = 'chord_index_gt'
 KEY_RN_INDEX_GT = 'rn_index_gt'
@@ -98,9 +101,10 @@ KEY_METER = 'meter'
 # TIME ATTRIBUTES                                #
 ##################################################
 
+# TODO - are these fixed for some reason or arbitrarily chosen?
 TICKS_PER_QUARTER = 24
 FRAMES_PER_QUARTER = 4
-FRAMES_PER_SAMPLE = 24
+FRAMES_PER_SAMPLE = 24 # TODO - AKA "Sequence Length:"" - should parameterize this in training script
 TICKS_PER_FRAME = TICKS_PER_QUARTER / FRAMES_PER_QUARTER
 
 ##################################################
@@ -179,6 +183,7 @@ INVERSIONS = ['root', '1st', '2nd', '3rd']
 
 # KEY
 NUM_TONICS = 12
+# TODO - should this include B♯/C♭ or E♯/F♭?
 CLEAN_TONICS = {
     'C'  : 'C',
     'C+' : 'C♯',
@@ -274,4 +279,22 @@ NUM_HARMONIES = {
     # 480 = 12 * 10 * 4
     HARMONY_TYPE_RN : np.prod(RN_COMPONENT_DIMS)
     # 34560 = 24 * 36 * 10 * 4
+}
+
+ACCIDENTALS = ['♮', '♭', '♯'] # TODO - unused
+
+FUNCTIONS = { # TODO - unused
+    '1'  : 0,
+    '♭2' : 1,
+    '2'  : 2,
+    '♭3' : 3,
+    '3'  : 4,
+    '4'  : 5,
+    '♯4' : 6,
+    '♭5' : 6,
+    '5'  : 7,
+    '♭6' : 8,
+    '6'  : 9,
+    '♭7' : 10,
+    '7'  : 11
 }

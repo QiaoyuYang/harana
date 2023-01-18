@@ -1,7 +1,7 @@
 # Training and evaluation of the model
 
 # My import
-from .datasets.BPSFH_Qiaoyu import BPSFH
+from .datasets.BPSFH import BPSFH
 from .models.model_assembler import ModelComplete
 from . import tools
 from . import evaluation
@@ -76,7 +76,7 @@ def main(args_in):
 	validation_loader = DataLoader(dataset=validation_dataset, batch_size=batch_size, shuffle=True)
 
 	# Initialize the device
-	device = torch.device('cuda:3' if torch.cuda.is_available() else 'cpu')
+	device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 	# Initialize the model and the optimizer
 	model = ModelComplete(batch_size, segment_max_len, harmony_type, decode_type, device)
