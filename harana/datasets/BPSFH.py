@@ -5,6 +5,7 @@ from .. import tools
 # Regular imports
 import pandas as pd
 import numpy as np
+import shutil
 import math
 import os
 
@@ -86,28 +87,24 @@ class BPSFH(HarmonyDataset):
             num_pos_range_ticks = max(0, tick_final) - max(0, tick_offset)
             num_neg_range_ticks = min(0, tick_final) - min(0, tick_offset)
 
-            # TODO - I think the following block attempts to fix the measure offset bug...
-            #        Verify it works or exchange with my proposed solution
-            frames_per_measure = meter.get_measure_length() * tools.FRAMES_PER_QUARTER
-            # Determine how many frames correspond to time before the measure at zero time
-            # Pad the negative frames to a full measure
-            num_neg_frames = 0
-            if num_neg_range_ticks:
-                num_neg_frames = frames_per_measure
+            # Determine how many frames correspond to time before/after the measure at zero time
+            num_neg_frames = math.ceil(num_neg_range_ticks / tools.TICKS_PER_FRAME)
+            num_pos_frames = math.ceil(num_pos_range_ticks / tools.TICKS_PER_FRAME)
+
+            # Compute the amount of frames a single measure spans
+            frames_per_measure = tools.FRAMES_PER_QUARTER * meter.get_measure_length()
+
+            # Pad frames on each side of zero time to start and end on measure divisions
+            # TODO - do we want to pad for full measures here or under snap_to_measure=True?
+            #        what do the chord labels look like for these padded frames?
+            #        is it OK to always do this?
+            num_neg_frames = math.ceil(num_neg_frames / frames_per_measure) * frames_per_measure
+            num_pos_frames = math.ceil(num_pos_frames / frames_per_measure) * frames_per_measure
 
             # Compute the global tick offset needed to start with a full frame
             tick_offset_frame = -(num_neg_frames * tools.TICKS_PER_FRAME)
 
-            # TODO - this has also been slightly modified, verify it...
-            # raw frames
-            num_pos_frames = math.ceil(num_pos_range_ticks / tools.TICKS_PER_FRAME)
-            # If not, pad the last measure to a full measure
-            num_pos_frames = math.ceil(num_pos_frames / frames_per_measure) * frames_per_measure
-
-            # TODO - optionally disable negative frames?
-
-            # Determine the total number of frames based off of both ranges,
-            # such that frames onsets line up with the start of each measure
+            # Determine the total number of frames based off of both ranges
             num_frames = num_neg_frames + num_pos_frames
 
             pitch_class_activity = self.create_note_tensors(notes, num_frames, tick_offset_frame)

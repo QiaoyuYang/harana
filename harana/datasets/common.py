@@ -18,7 +18,6 @@ from torch.utils.data import Dataset
 
 
 class HarmonyDataset(Dataset):
-	
 	# A generic class for harmony datasets
 	def __init__(self, base_dir, splits, harmony_type, reset_data, store_data, save_data, save_loc, seed):
 
@@ -136,11 +135,10 @@ class HarmonyDataset(Dataset):
 			frame_start = self.rng.randint(0, data[tools.KEY_PC_ACT].shape[-1] - tools.FRAMES_PER_SAMPLE)
 
 		if snap_to_measure:
-			# TODO - revisit solutions I proposed in Slack to fix this
 			# Compute the amount of frames a single measure spans
 			frames_per_measure = tools.FRAMES_PER_QUARTER * data[tools.KEY_METER].get_measure_length()
 			# Make sure the sampled frame start corresponds to the start of a measure
-			frame_start = round(frame_start / frames_per_measure) * frames_per_measure
+			frame_start = math.floor(frame_start / frames_per_measure) * frames_per_measure
 
 		# Determine where the sample ends
 		frame_stop = frame_start + tools.FRAMES_PER_SAMPLE
