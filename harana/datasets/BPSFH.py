@@ -15,13 +15,13 @@ class BPSFH(HarmonyDataset):
     TODO
     """
 
-    def __init__(self, base_dir=None, splits=None, harmony_type='CHORD', reset_data=False,
-                       store_data=False, save_data=False, save_loc=None, seed=0):
+    def __init__(self, base_dir=None, splits=None, reset_data=False,
+                 store_data=False, save_data=False, save_loc=None, seed=0):
         """
         TODO
         """
 
-        super().__init__(base_dir, splits, harmony_type, reset_data, store_data, save_data, save_loc, seed)
+        super().__init__(base_dir, splits, reset_data, store_data, save_data, save_loc, seed)
 
     def get_tracks(self, split):
         """
@@ -114,7 +114,6 @@ class BPSFH(HarmonyDataset):
             # Add all relevant entries to the dictionary
             data.update({
                 tools.KEY_TRACK : track,
-                tools.KEY_OFFSET : num_neg_frames,
                 
                 tools.KEY_PC_ACT : pitch_class_activity,
                 
@@ -152,7 +151,6 @@ class BPSFH(HarmonyDataset):
         for onset_quarter, midi_pitch, morph_pitch, \
                 quarter_duration, staff_num, measure_num in note_entries:
             # Convert the onset and duration to ticks
-            # TODO - I think we should floor the onset tick and ceiling the duration
             onset_tick = onset_quarter * tools.TICKS_PER_QUARTER
             tick_duration = quarter_duration * tools.TICKS_PER_QUARTER
 
@@ -315,13 +313,12 @@ class BPSFH(HarmonyDataset):
     @staticmethod
     def available_splits():
         """
-        Obtain a list of possible splits. The splits are by piece indexes.
-        Each split includes four pieces consecutive in index.
+        Obtain a list of possible splits by groups of consecutive piece indices.
 
         Returns
         ----------
         splits : list of strings
-          Player codes listed at beginning of file names
+          Groups of consecutive indices
         """
 
         splits = ['00', '01', '02', '03']

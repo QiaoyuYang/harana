@@ -18,7 +18,6 @@ __all__ = [
     'KEY_RN_INDEX_GT',
     'KEY_CHORD_COMPONENT_GT',
     'KEY_RN_COMPONENT_GT',
-    'KEY_OFFSET',
     'KEY_METER',
     'TICKS_PER_QUARTER',
     'FRAMES_PER_QUARTER',
@@ -94,7 +93,6 @@ KEY_RN_INDEX_GT = 'rn_index_gt'
 KEY_CHORD_COMPONENT_GT = 'chord_component_gt'
 KEY_RN_COMPONENT_GT = 'rn_component_gt'
 
-KEY_OFFSET = 'negative_frame_offset'
 KEY_METER = 'meter'
 
 ##################################################

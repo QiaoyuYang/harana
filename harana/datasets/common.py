@@ -1,7 +1,6 @@
 # Common codes to preprocess the datasets
 
 # My import
-
 from .. import tools
 
 # External import
@@ -13,13 +12,18 @@ import numpy as np
 from tqdm import tqdm
 from copy import deepcopy
 from abc import abstractmethod
-import torch
 from torch.utils.data import Dataset
 
 
 class HarmonyDataset(Dataset):
-	# A generic class for harmony datasets
-	def __init__(self, base_dir, splits, harmony_type, reset_data, store_data, save_data, save_loc, seed):
+	"""
+	A generic class for harmony datasets.
+	"""
+
+	def __init__(self, base_dir, splits, reset_data, store_data, save_data, save_loc, seed):
+		"""
+		TODO
+		"""
 
 		# Select a default base directory path if none was provided
 		self.base_dir = os.path.join(tools.DEFAULT_DATASETS_DIR, self.dataset_name()) if base_dir is None else base_dir
@@ -73,6 +77,7 @@ class HarmonyDataset(Dataset):
 
 		Number of tracks in the dataset partition
 		"""
+
 		length = len(self.tracks)
 
 		return length
@@ -101,7 +106,6 @@ class HarmonyDataset(Dataset):
 		data = self.get_track_data(track_id)
 
 		# Remove unnecessary and un-batchable entries
-		data.pop(tools.KEY_OFFSET, None)
 		data.pop(tools.KEY_METER, None)
 
 		return data
@@ -170,15 +174,16 @@ class HarmonyDataset(Dataset):
 		"""
 		Get the ground truth for a track. If it has already been saved, load it.
 		If the ground-truth does not exist yet, initialize a new dictionary to hold it.
+
 		Parameters
 		----------
 		track : string
-		Name of the track to load
+		  Name of the track to load
 
 		Returns
 		----------
 		data : dict
-		Dictionary with ground-truth for the track
+		  Dictionary with ground-truth for the track
 		"""
 
 		# Default data to None (not existing)
@@ -205,6 +210,9 @@ class HarmonyDataset(Dataset):
 		return data
 
 	def create_note_tensors(self, notes, num_frames, tick_offset_frame):
+		"""
+		TODO
+		"""
 
 		# Initialize arrays to hold frame-level pitch activity and distribution
 		pitch_activity = np.zeros((tools.NUM_PIANO_KEYS, num_frames))
@@ -232,6 +240,11 @@ class HarmonyDataset(Dataset):
 		return pitch_class_activity
 
 	def create_harmony_tensors(self, harmonies, num_frames, tick_offset_frame):
+		"""
+		TODO
+		"""
+
+		# TODO - verify functionality in here
 
 		# Initialize arrays to hold frame-level harmony label indexes and component indexes
 		chord_index_gt = np.zeros((num_frames,))
@@ -241,7 +254,7 @@ class HarmonyDataset(Dataset):
 
 		for harmony in harmonies:
 
-			# Adjust the onset and offset tick based on the pre-measureticks
+			# Adjust the onset and offset tick based on the pre-measure ticks
 			adjusted_onset_tick = harmony.onset - tick_offset_frame
 			adjusted_offset_tick = harmony.get_offset() - tick_offset_frame
 			# Determine the frames where the note begins and ends
