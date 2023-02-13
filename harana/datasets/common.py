@@ -9,6 +9,7 @@ import os
 import math
 import shutil
 import warnings
+import torch
 import numpy as np
 from tqdm import tqdm
 from copy import deepcopy
@@ -16,10 +17,10 @@ from abc import abstractmethod
 import torch
 from torch.utils.data import Dataset
 
-class HarmonyDataset(Dataset):
+class HaranaDataset(Dataset):
 	
 	# A generic class for harmony datasets
-	def __init__(self, base_dir, splits, harmony_type, reset_data, store_data, save_data, save_loc, seed):
+	def __init__(self, base_dir, splits, sample_size, harmony_type, reset_data, store_data, save_data, save_loc, seed):
 
 		# Select a default base directory path if none was provided
 		self.base_dir = os.path.join(tools.DEFAULT_DATASETS_DIR, self.dataset_name()) if base_dir is None else base_dir
@@ -33,6 +34,11 @@ class HarmonyDataset(Dataset):
 
 		# Choose all available dataset splits if none were provided
 		self.splits = self.available_splits() if splits is None else splits
+
+		self.sample_size = tools.DEFAULT_SAMPLE_SIZE if sample_size is None else sample_size
+
+		self.harmony_type = tools.DEFAULT_HARMONY_TYPE if harmony_type is None else harmony_type 
+
 
 		# Set the storing and saving parameters
 		self.store_data = store_data
@@ -120,7 +126,7 @@ class HarmonyDataset(Dataset):
 
 		if frame_start is None:
 			# If a specific starting frame was not provided, sample one randomly
-			frame_start = self.rng.randint(0, data[tools.KEY_PC_ACT].shape[-1] - tools.FRAMES_PER_SAMPLE)
+			frame_start = self.rng.randint(0, data[tools.KEY_PC_ACT].shape[-1] - self.sample_size)
 		if snap_to_measure:
 			# Compute the amount of frames a single measure spans
 			frames_per_measure = tools.FRAMES_PER_QUARTER * data[tools.KEY_METER].get_measure_length()
@@ -128,7 +134,7 @@ class HarmonyDataset(Dataset):
 			frame_start = round(frame_start / frames_per_measure) * frames_per_measure
 
 		# Determine where the sample ends
-		frame_stop = frame_start + tools.FRAMES_PER_SAMPLE
+		frame_stop = frame_start + self.sample_size
 
 		# Loop through the dictionary keys
 		for key in data.keys():
@@ -180,7 +186,6 @@ class HarmonyDataset(Dataset):
 
 		# Initialize arrays to hold frame-level pitch activity and distribution
 		pitch_activity = np.zeros((tools.NUM_PIANO_KEYS, num_frames))
-		pitch_distr = pitch_activity.copy()
 
 		for note in notes:
 			# Adjust the onset and offset tick based on the pre-measureticks
@@ -193,8 +198,14 @@ class HarmonyDataset(Dataset):
 			# Account for the pitch activity of the note
 			pitch_activity[note.get_key_index(), frame_onset : frame_offset + 1] = 1
 
-		# Determine which frames contain pitch activity
-		active_frames = np.sum(pitch_activity, axis=0) > 0
+		bass_pitch_class = np.zeros((tools.NUM_PC, num_frames))
+		for f_i in range(num_frames):
+			active_pitches = np.where(pitch_activity[:, f_i] == 1)[0]
+			if len(active_pitches) > 0:
+				bass_pc = active_pitches[0] % tools.NUM_PC
+				bass_pitch_class[bass_pc, f_i] = 1
+
+
 
 		# Construct an empty array of activations to complete the first octave
 		out_of_bounds_pitches = np.zeros((tools.NUM_PC - tools.NUM_PIANO_KEYS % tools.NUM_PC, num_frames))
@@ -205,15 +216,13 @@ class HarmonyDataset(Dataset):
 		# Collapse the pitch activations along the octave dimension to obtain pitch class activations
 		pitch_class_activity = np.max(pitch_activity_uncollapsed.reshape(-1, tools.NUM_PC, num_frames), axis=0)
 
-		return pitch_class_activity
+		return pitch_class_activity, bass_pitch_class
 
 	def create_harmony_tensors(self, harmonies, num_frames, tick_offset_frame):
 
 		# Initialize arrays to hold frame-level harmony label indexes and component indexes
-		chord_index_gt = np.zeros((num_frames,))
-		rn_index_gt = np.zeros((num_frames,))
-		chord_component_gt = np.zeros((tools.NUM_CHORD_COMPONENTS, num_frames))
-		rn_component_gt = np.zeros((tools.NUM_RN_COMPONENTS, num_frames))
+		harmony_index_gt = np.zeros((num_frames,))
+		harmony_component_gt = np.zeros((tools.NUM_HARMONY_COMPONENTS[self.harmony_type], num_frames))
 
 		for harmony in harmonies:
 
@@ -225,24 +234,22 @@ class HarmonyDataset(Dataset):
 			frame_offset = math.floor(adjusted_offset_tick / tools.TICKS_PER_FRAME)
 
 			# Get the current harmony label index
-			chord_index_cur = harmony.chord.get_index()
-			rn_index_cur = harmony.rn.get_index()
+			if self.harmony_type is tools.HARMONY_TYPE_CHORD:
+				harmony_index_cur = harmony.chord.get_index()
+			elif self.harmony_type is tools.HARMONY_TYPE_RN:
+				harmony_index_cur = harmony.rn.get_index()
+
 			# Parse the harmony label index into component indexes
-			chord_component_indexes_cur = tools.Harmony.parse_harmony_index(chord_index_cur, tools.HARMONY_TYPE_CHORD)
-			rn_component_indexes_cur = tools.Harmony.parse_harmony_index(rn_index_cur, tools.HARMONY_TYPE_RN)
+			harmony_component_indexes_cur = tools.Harmony.parse_harmony_index(harmony_index_cur, self.harmony_type)
 
 			# Update label index vector
-			chord_index_gt[frame_onset : frame_offset + 1] = chord_index_cur
-			rn_index_gt[frame_onset : frame_offset + 1] = rn_index_cur
+			harmony_index_gt[frame_onset : frame_offset + 1] = harmony_index_cur
 
 			# Update component index vector
-			for i in range(tools.NUM_CHORD_COMPONENTS):
-				chord_component_gt[i, frame_onset : frame_offset + 1] = 1
+			for i in range(tools.NUM_HARMONY_COMPONENTS[self.harmony_type]):
+				harmony_component_gt[i, frame_onset : frame_offset + 1] = harmony_component_indexes_cur[i]
 
-			for i in range(tools.NUM_RN_COMPONENTS):
-				rn_component_gt[i, frame_onset : frame_offset + 1] = 1
-
-		return chord_index_gt, rn_index_gt, chord_component_gt, rn_component_gt
+		return harmony_index_gt, harmony_component_gt
 
 	@abstractmethod
 	def get_tracks(self, split):

@@ -1,5 +1,5 @@
 # Our imports
-from .common import HarmonyDataset
+from .common import HaranaDataset
 from .. import tools
 
 # Regular imports
@@ -9,17 +9,17 @@ import math
 import os
 
 
-class BPSFH(HarmonyDataset):
+class BPSFH(HaranaDataset):
     """
     TODO
     """
 
-    def __init__(self, base_dir=None, splits=None, harmony_type='CHORD', reset_data=False,
+    def __init__(self, base_dir=None, splits=None, sample_size=None, harmony_type=None, reset_data=False,
                        store_data=False, save_data=False, save_loc=None, seed=0):
         """
         TODO
         """
-        super().__init__(base_dir, splits, harmony_type, reset_data, store_data, save_data, save_loc, seed)
+        super().__init__(base_dir, splits, sample_size, harmony_type, reset_data, store_data, save_data, save_loc, seed)
 
     def get_tracks(self, split):
         """
@@ -116,9 +116,9 @@ class BPSFH(HarmonyDataset):
             # such that frames onsets line up with the start of each measure
             num_frames = num_neg_frames + num_pos_frames
 
-            pitch_class_activity = self.create_note_tensors(notes, num_frames, tick_offset_frame)
+            pitch_class_activity, bass_pitch_class = self.create_note_tensors(notes, num_frames, tick_offset_frame)
 
-            chord_index_gt, rn_index_gt, chord_component_gt, rn_component_gt = self.create_harmony_tensors(harmonies, num_frames, tick_offset_frame)
+            harmony_index_gt, harmony_component_gt = self.create_harmony_tensors(harmonies, num_frames, tick_offset_frame)
 
 
             # Add all relevant entries to the dictionary
@@ -127,11 +127,10 @@ class BPSFH(HarmonyDataset):
                 tools.KEY_OFFSET : num_neg_frames,
                 
                 tools.KEY_PC_ACT : pitch_class_activity,
+                tools.KEY_BASS_PC : bass_pitch_class,
                 
-                tools.KEY_CHORD_INDEX_GT : chord_index_gt, 
-                tools.KEY_RN_INDEX_GT : rn_index_gt,
-                tools.KEY_CHORD_COMPONENT_GT : chord_component_gt,
-                tools.KEY_RN_COMPONENT_GT : rn_component_gt,
+                tools.KEY_HARMONY_INDEX_GT : harmony_index_gt, 
+                tools.KEY_HARMONY_COMPONENT_GT : harmony_component_gt,
 
                 tools.KEY_METER : meter
             })
