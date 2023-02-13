@@ -7,20 +7,20 @@ __all__ = [
     'DEFAULT_DATASETS_DIR',
     'DEFAULT_GENERATED_DIR',
     'DEFAULT_GROUND_TRUTH_DIR',
+    'DEFAULT_CHECKPOINT_DIR',
     'NPZ_EXT',
     'CSV_EXT',
     'XLSX_EXT',
+    'PT_EXT',
     'KEY_TRACK',
     'KEY_PC_ACT',
-    'KEY_CHORD_INDEX_GT',
-    'KEY_RN_INDEX_GT',
-    'KEY_CHORD_COMPONENT_GT',
-    'KEY_RN_COMPONENT_GT',
+    'KEY_BASS_PC',
+    'KEY_HARMONY_INDEX_GT',
+    'KEY_HARMONY_COMPONENT_GT',
     'KEY_OFFSET',
     'KEY_METER',
     'TICKS_PER_QUARTER',
     'FRAMES_PER_QUARTER',
-    'FRAMES_PER_SAMPLE',
     'TICKS_PER_FRAME',
     'XLSX_EXT',
     'NUM_PC',
@@ -51,10 +51,19 @@ __all__ = [
     'HARMONY_COMPONENT_DIMS',
     'CHORD_COMPONENT_DIMS',
     'RN_COMPONENT_DIMS',
-    'NUM_CHORD_COMPONENTS',
-    'NUM_RN_COMPONENTS',
+    'NUM_HARMONY_COMPONENTS',
+    'HARMONY_VEC_SIZE',
     'EMBEDDING_SIZE',
-    'NUM_HARMONIES'
+    'NUM_HARMONIES',
+    'DEFAULT_BATCH_SIZE',
+    'DEFAULT_SAMPLE_SIZE',
+    'DEFAULT_MAX_SEG_LEN',
+    'DEFAULT_HARMONY_TYPE',
+    'DEFAULT_DEVICE',
+    'DEFAULT_LR',
+    'DEFAULT_MAX_EPOCH',
+    'DEFAULT_EVAL_PERIOD',
+    'STAGES'
 ]
 
 ##################################################
@@ -69,6 +78,7 @@ DEFAULT_DATASETS_DIR = os.path.join(HOME, 'Desktop', 'Datasets')
 
 DEFAULT_GENERATED_DIR = os.path.join(ROOT_DIR, 'generated')
 DEFAULT_GROUND_TRUTH_DIR = os.path.join(DEFAULT_GENERATED_DIR, 'ground_truth')
+DEFAULT_CHECKPOINT_DIR = os.path.join(DEFAULT_GENERATED_DIR, 'checkpoint')
 
 ##################################################
 # FILE EXTENSIONS                                #
@@ -77,6 +87,7 @@ DEFAULT_GROUND_TRUTH_DIR = os.path.join(DEFAULT_GENERATED_DIR, 'ground_truth')
 NPZ_EXT = 'npz'
 CSV_EXT = 'csv'
 XLSX_EXT = 'xlsx'
+PT_EXT = 'pt'
 
 ##################################################
 # DICTIONARY KEYS                                #
@@ -85,11 +96,10 @@ XLSX_EXT = 'xlsx'
 KEY_TRACK = 'track'
 
 KEY_PC_ACT = 'pitch_class_activity'
+KEY_BASS_PC = 'bass_pc'
 
-KEY_CHORD_INDEX_GT = 'chord_index_gt'
-KEY_RN_INDEX_GT = 'rn_index_gt'
-KEY_CHORD_COMPONENT_GT = 'chord_component_gt'
-KEY_RN_COMPONENT_GT = 'rn_component_gt'
+KEY_HARMONY_INDEX_GT = 'harmony_index_gt'
+KEY_HARMONY_COMPONENT_GT = 'harmony_component_gt'
 
 KEY_OFFSET = 'negative_frame_offset'
 KEY_METER = 'meter'
@@ -100,7 +110,6 @@ KEY_METER = 'meter'
 
 TICKS_PER_QUARTER = 24
 FRAMES_PER_QUARTER = 4
-FRAMES_PER_SAMPLE = 24
 TICKS_PER_FRAME = TICKS_PER_QUARTER / FRAMES_PER_QUARTER
 
 ##################################################
@@ -256,17 +265,21 @@ COMPONENT_DIMS = {
 CHORD_COMPONENT_DIMS = [COMPONENT_DIMS[component] for component in HARMONY_COMPONENTS[HARMONY_TYPE_CHORD]]
 RN_COMPONENT_DIMS = [COMPONENT_DIMS[component] for component in HARMONY_COMPONENTS[HARMONY_TYPE_RN]]
 
-NUM_CHORD_COMPONENTS = len(CHORD_COMPONENT_DIMS)
-NUM_RN_COMPONENTS = len(RN_COMPONENT_DIMS)
-
 HARMONY_COMPONENT_DIMS = {
     HARMONY_TYPE_CHORD : CHORD_COMPONENT_DIMS,
     HARMONY_TYPE_RN : RN_COMPONENT_DIMS
 }
 
-EMBEDDING_SIZE = {
+NUM_HARMONY_COMPONENTS = {
+    HARMONY_TYPE_CHORD : len(CHORD_COMPONENT_DIMS),
+    HARMONY_TYPE_RN : len(RN_COMPONENT_DIMS)
+}
+
+HARMONY_VEC_SIZE = {
     HARMONY_TYPE_CHORD : np.sum(CHORD_COMPONENT_DIMS),
+    # 26 = 12 + 10 + 4
     HARMONY_TYPE_RN : np.sum(RN_COMPONENT_DIMS)
+    # 74 = 24 + 36 + 10 + 4
 }
 
 NUM_HARMONIES = {
@@ -275,3 +288,24 @@ NUM_HARMONIES = {
     HARMONY_TYPE_RN : np.prod(RN_COMPONENT_DIMS)
     # 34560 = 24 * 36 * 10 * 4
 }
+
+EMBEDDING_SIZE = {
+    HARMONY_TYPE_CHORD : 10,
+    # 10 = 4 + 4 + 2
+    HARMONY_TYPE_RN : 16
+    # 17 = 5 + 6 + 4 + 2
+}
+
+##################################################
+# PIPELINE ATTRIBUTES                            #
+##################################################
+
+DEFAULT_BATCH_SIZE = 8
+DEFAULT_SAMPLE_SIZE = 48
+DEFAULT_MAX_SEG_LEN = 16
+DEFAULT_HARMONY_TYPE = HARMONY_TYPE_CHORD
+DEFAULT_DEVICE = 'cpu'
+DEFAULT_LR = 0.001
+DEFAULT_MAX_EPOCH = 1000
+DEFAULT_EVAL_PERIOD = 100
+STAGES = {"Validation", "Training"}
