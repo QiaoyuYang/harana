@@ -1,25 +1,38 @@
-from .models.model_assembler import Note2HarmonySoftmax, Harmony2HarmonySoftmax, Note2HarmonySemiCRF
+from .models.model_assembler import Note2HarmonySoftMax, Note2HarmonySemiCRF, Note2HarmonyNADE, Note2HarmonyRuleSemiCRF
+from .models.decoder import SemiCRFDecoder
 from . import tools
 
 import os
 import shutil
 import psutil
 from abc import abstractmethod
+from datetime import datetime
+
+import numpy as np
 import torch
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 
-class TrainingPipeline:
+class Pipeline:
 
-	def __init__(self, batch_size, sample_size, harmony_type, device, lr, max_epoch, eval_period, store_model, save_model, reset_model, save_loc):
+	def __init__(self, note_encoder_type='CRNN', decoder_type='SemiCRF', harmony_type=tools.DEFAULT_HARMONY_TYPE,
+					batch_size=tools.DEFAULT_BATCH_SIZE, sample_size=tools.DEFAULT_SAMPLE_SIZE, max_seg_len=tools.DEFAULT_MAX_SEG_LEN, device=tools.DEFAULT_DEVICE,
+					lr=tools.DEFAULT_LR, max_epoch=tools.DEFAULT_MAX_EPOCH, eval_period=tools.DEFAULT_EVAL_PERIOD, pretrain=False,
+					store_model=True, save_model=True, reset_model=True, save_loc=None, pipeline_type=tools.PIPELINE_TYPE_TRAIN):
+
+		self.note_encoder_type = note_encoder_type
+		self.decoder_type = decoder_type
+		self.harmony_type = harmony_type
 
 		self.batch_size = batch_size
 		self.sample_size = sample_size
-		self.harmony_type = harmony_type
+		self.max_seg_len = max_seg_len
 		self.device = device
+		
 		self.lr = lr
 		self.max_epoch = max_epoch
 		self.eval_period = eval_period
+		self.pretrain = pretrain
 
 		# Set the storing and saving parameters
 		self.store_model = store_model
@@ -37,15 +50,47 @@ class TrainingPipeline:
 		if self.store_model:
 			self.model = self.load()
 
-		self.evaluator = tools.Evaluator(harmony_type, batch_size, sample_size)
+		self.evaluator = tools.Evaluator(harmony_type, batch_size, sample_size, pipeline_type)
+	
+	def load(self):
+		
+		if self.decoder_type == "SoftMax":
+			model = Note2HarmonySoftMax(self.note_encoder_type, self.harmony_type, self.batch_size, self.sample_size, self.device)
+		if self.decoder_type == "NADE":
+			model = Note2HarmonyNADE(self.note_encoder_type, self.harmony_type, self.batch_size, self.sample_size, self.device)
+		elif self.decoder_type == "SemiCRF":
+			if self.note_encoder_type == "PC":
+				model = Note2HarmonyRuleSemiCRF(self.harmony_type, self.batch_size, self.sample_size, self.max_seg_len, self.device)
+			elif self.note_encoder_type == "CRNN":
+				model = Note2HarmonySemiCRF(self.harmony_type, self.batch_size, self.sample_size, self.max_seg_len, self.device)
+
+		if isinstance(model.decoder, SemiCRFDecoder):
+			train_gt_path = os.path.join(tools.DEFAULT_GROUND_TRUTH_DIR, 'train')
+			validation_gt_path = os.path.join(tools.DEFAULT_GROUND_TRUTH_DIR, 'validation')
+			train_transition_path = os.path.join(train_gt_path, f'trans.{tools.NPY_EXT}')
+			validation_transition_path = os.path.join(validation_gt_path, f'trans.{tools.NPY_EXT}')
+			model.decoder.semicrf.train_transitions = torch.tensor(np.load(train_transition_path, allow_pickle=True))
+			model.decoder.semicrf.train_transitions = model.decoder.semicrf.train_transitions.to(self.device)
+			model.decoder.semicrf.validation_transitions = torch.tensor(np.load(validation_transition_path, allow_pickle=True))
+			model.decoder.semicrf.validation_transitions = model.decoder.semicrf.validation_transitions.to(self.device)
+
+		model_path = self.get_model_path(with_filename=True)
+		
+		if self.save_model and os.path.exists(model_path):
+			model.load_state_dict(torch.load(model_path), strict=False)
+
+		if self.pretrain:
+			pretrained_model_name = "_".join((self.harmony_type, "CRNN", "SoftMax"))
+			pretrained_model_path = os.path.join(self.save_loc, pretrained_model_name)
+			pretrained_model_filename = os.listdir(pretrained_model_path)[-1]
+			unmatched_parameters = model.load_state_dict(torch.load(os.path.join(pretrained_model_path, pretrained_model_filename)), strict=False)
+
+		return model
 
 	def train(self, train_loader, validation_loader):
-
+		
 		self.model.to(self.device)
-		optimizer = optim.Adam(self.model.parameters(), lr = self.lr)
-
-		# Initialize a tensor board
-		tb = SummaryWriter()
+		optimizer = optim.Adam(self.model.parameters(), lr = self.lr, weight_decay=0.0001)
 
 		# The first epoch is not in the eval mode
 		eval_epoch = False
@@ -70,7 +115,7 @@ class TrainingPipeline:
 				optimizer.zero_grad()
 				print(f"\nTraining... epoch: {epoch}, batch: {batch_idx}")
 
-				train_loss = self.model.get_loss(train_batch)
+				train_loss = self.model.get_loss(train_batch, stage)
 				print(f"Training loss: {train_loss}")
 
 				# Backward propogation
@@ -91,170 +136,88 @@ class TrainingPipeline:
 						print("Evaluating on the training batch")
 						decode_result_train = self.model.decode()
 						
-						if isinstance(self.model, Harmony2HarmonySoftmax):
-							frame_gt = self.model.harmony_encoder.harmony_vector
-						else:
-							frame_gt = self.evaluator.get_gt(train_batch)
-					frame_gt = frame_gt.to(self.device)
-					self.evaluator.update_metrics(train_loss, frame_gt, decode_result_train, stage)
+						gt_train = self.model.decoder.frame_postprocess(self.evaluator.get_gt(train_batch))
+						
+						self.evaluator.update_metrics(train_loss, decode_result_train, gt_train, stage)
 
 			stage = 'Validation'
+			
 			# Run evaluation on the validation dataset
 			if eval_epoch:
+				
 				for batch_idx, validation_batch in enumerate(validation_loader):
+					
 					self.evaluator.num_batch[stage] += 1
+					
 					with torch.no_grad():
 						print(f"\nValidation... epoch: {epoch}, batch: {batch_idx}")
 						print("Evaluating on the validation batch")
 
-						validation_loss = self.model.get_loss(validation_batch)
+						validation_loss = self.model.get_loss(validation_batch, stage)
 						print(f"Validation loss: {validation_loss}")
 
 						decode_result_validation = self.model.decode()
-						if isinstance(self.model, Harmony2HarmonySoftmax):
-							frame_gt = self.model.harmony_encoder.harmony_vector
-						else:
-							frame_gt = self.evaluator.get_gt(validation_batch)
-				frame_gt = frame_gt.to(self.device)
-				self.evaluator.update_metrics(validation_loss, frame_gt, decode_result_validation, stage)
+						
+						gt_validation = self.model.decoder.frame_postprocess(self.evaluator.get_gt(validation_batch))
+						
+						self.evaluator.update_metrics(validation_loss, decode_result_validation, gt_validation, stage)
 
 				###################################
 				#   Report Evaluation statistics   #
 				####################################
+				
 				best_model = self.evaluator.summarize_epoch(epoch)
 				if best_model:
 					torch.save(self.model.state_dict(), self.get_model_path(with_filename=True))
+				
 				eval_epoch = False
 
-class Note2HarmonySoftmaxTrainer(TrainingPipeline):
+	def test(self, test_loader):
+		self.model.to(self.device)
+
+		# Initialize a tensor board
+		tb = SummaryWriter()
+		
+		self.evaluator.initialize()
+		
+		stage = 'Test'
+		
+		for batch_idx, test_batch in enumerate(test_loader):
+			
+			self.evaluator.num_batch[stage] += 1
+			
+			with torch.no_grad():
+				
+				print(f"\nTesting... batch: {batch_idx}")
+				print("Evaluating on the Test batch")
+
+				test_loss = self.model.get_loss(test_batch, stage)
+				print(f"Validation loss: {test_loss}")
+
+				decode_result_test = self.model.decode()
+
+				gt_test = self.model.decoder.frame_postprocess(self.evaluator.get_gt(test_batch))
+				
+				self.evaluator.update_metrics(test_loss, decode_result_test, gt_test, stage)
+
+		self.evaluator.summarize_epoch(0)
 	
-	def __init__(self, batch_size=tools.DEFAULT_BATCH_SIZE, sample_size=tools.DEFAULT_SAMPLE_SIZE, 
-					harmony_type=tools.DEFAULT_HARMONY_TYPE, device=tools.DEFAULT_DEVICE, lr=tools.DEFAULT_LR, 
-					max_epoch=tools.DEFAULT_MAX_EPOCH, eval_period=tools.DEFAULT_EVAL_PERIOD,
-					store_model=True, save_model=True, reset_model=True, save_loc=None):
-
-		super().__init__(batch_size, sample_size, harmony_type, device, lr, max_epoch, 
-							eval_period, store_model, save_model, reset_model, save_loc)
-
-	def load(self):
-
-		model = Note2HarmonySoftmax(batch_size=self.batch_size, sample_size=self.sample_size, harmony_type=self.harmony_type, device=self.device)
-		
-		model_path = self.get_model_path(with_filename=True)
-		
-		if self.save_model and os.path.exists(self.get_model_path(with_filename=True)):
-			model.load_state_dict(torch.load(model_path), strict=False)
-
-		return model
-
-	def run(self, train_loader, validation_loader):
-
-		self.train(training_loader, validation_loader)
-
 	def get_model_path(self, with_filename=False):
-		# Get the path to the model directory
-		path = os.path.join(self.save_loc, f'{self.model_name()}')
 		
 		if with_filename:
-			path = os.path.join(self.save_loc, f'{self.model_name()}', f'checkpoint.{tools.PT_EXT}')
-		return path
-	
-	@classmethod
-	def model_name(cls):
-
-		tag = cls.__name__.rstrip('Trainer')
-
-		return tag
-
-class Harmony2HarmonySoftmaxTrainer(TrainingPipeline):
-	def __init__(self, batch_size=tools.DEFAULT_BATCH_SIZE, sample_size=tools.DEFAULT_SAMPLE_SIZE, 
-					harmony_type=tools.DEFAULT_HARMONY_TYPE, device=tools.DEFAULT_DEVICE, lr=tools.DEFAULT_LR, 
-					max_epoch=tools.DEFAULT_MAX_EPOCH, eval_period=tools.DEFAULT_EVAL_PERIOD,
-					store_model=True, save_model=True, reset_model=True, save_loc=None):
-
-		super().__init__(batch_size, sample_size, harmony_type, device, lr, max_epoch, 
-							eval_period, store_model, save_model, reset_model, save_loc)
-
-	def load(self):
-		
-		model = Harmony2HarmonySoftmax(batch_size=self.batch_size, sample_size=self.sample_size, harmony_type=self.harmony_type, device=self.device)
-
-		model_path = self.get_model_path(with_filename=True)
-
-		if self.save_model and os.path.exists(self.get_model_path(with_filename=True)):
-			model.load_state_dict(torch.load(model_path), strict=False)
-
-		return model
-
-	def run(self, train_loader, validation_loader):
-
-		self.train(training_loader, validation_loader)
-
-	def get_model_path(self, with_filename=False):
-		# Get the path to the model directory
-		path = os.path.join(self.save_loc, f'{self.model_name()}')
-
-		if with_filename:
-			path = os.path.join(self.save_loc, f'{self.model_name()}', f'checkpoint.{tools.PT_EXT}')
-
+			# Get the path to the model directory
+			path = os.path.join(self.save_loc, f'{self.model_name()}', f'checkpoint_{datetime.now().strftime("%y%m%d_%H%M%S")}.{tools.PT_EXT}')
+		else:
+			path = os.path.join(self.save_loc, f'{self.model_name()}')
 
 		return path
 	
-	@classmethod
-	def model_name(cls):
-
-		tag = cls.__name__.rstrip('Trainer')
-
-		return tag
-
-class Note2HarmonySemiCRFTrainer(TrainingPipeline):
-	def __init__(self, batch_size=tools.DEFAULT_BATCH_SIZE, sample_size=tools.DEFAULT_SAMPLE_SIZE, 
-					harmony_type=tools.DEFAULT_HARMONY_TYPE, device=tools.DEFAULT_DEVICE, lr=tools.DEFAULT_LR, 
-					max_epoch=tools.DEFAULT_MAX_EPOCH, eval_period=tools.DEFAULT_EVAL_PERIOD,
-					store_model=True, save_model=True, reset_model=True, pretrain=True, save_loc=None):
+	def model_name(self):
 		
-		self.pretrain = pretrain
-		
-		super().__init__(batch_size, sample_size, harmony_type, device, lr, max_epoch, 
-							eval_period, store_model, save_model, reset_model, save_loc)
-
-	def load(self):
-		
-		model = Note2HarmonySemiCRF(batch_size=self.batch_size, sample_size=self.sample_size, harmony_type=self.harmony_type, device=self.device)
-
-		model_path = self.get_model_path(with_filename=True)
-		
-		if self.save_model and os.path.exists(self.get_model_path(with_filename=True)):
-			model.load_state_dict(torch.load(model_path), strict=False)
-
-		if self.pretrain:
-			note_encoder_path = os.path.join(self.save_loc, 'Note2HarmonySoftmax', f'checkpoint.{tools.PT_EXT}')
-			harmony_encoder_path = os.path.join(self.save_loc, 'Harmony2HarmonySoftmax', f'checkpoint.{tools.PT_EXT}')
-			if os.path.exists(note_encoder_path):
-				note_encoder_incompatible_keys = model.load_state_dict(torch.load(note_encoder_path), strict=False)
-			if os.path.exists(harmony_encoder_path):
-				harmony_encoder_incompatible_keys = model.load_state_dict(torch.load(harmony_encoder_path), strict=False)
-
-
-		return model
-
-	def run(self, train_loader, validation_loader):
-
-		self.train(training_loader, validation_loader)
-
-	def get_model_path(self, with_filename=False):
-		# Get the path to the model directory
-		path = os.path.join(self.save_loc, f'{self.model_name()}')
-
-		if with_filename:
-			path = os.path.join(self.save_loc, f'{self.model_name()}', f'checkpoint.{tools.PT_EXT}')
-
-
-		return path
-	
-	@classmethod
-	def model_name(cls):
-
-		tag = cls.__name__.rstrip('Trainer')
-
-		return tag
+		if self.decoder_type == "SoftMax":
+			model_name = "_".join((self.harmony_type, self.note_encoder_type, self.decoder_type))
+		elif self.decoder_type == "NADE":
+			model_name = "_".join((self.harmony_type, self.note_encoder_type, self.decoder_type))
+		elif self.decoder_type == "SemiCRF":
+			model_name = "_".join((self.harmony_type, self.note_encoder_type, self.decoder_type))
+		return model_name

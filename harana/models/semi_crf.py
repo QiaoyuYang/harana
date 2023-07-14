@@ -8,16 +8,19 @@ from torch import nn
 
 class SemiCRF(nn.Module):
 
-    def __init__(self, batch_size, sample_size, max_seg_len, num_label, device, transition_importance, with_transition):
+    def __init__(self, with_transition, transition_importance, batch_size, sample_size, max_seg_len, num_label, device):
+        
         super().__init__()
+        
+        self.with_transition = with_transition
+        self.transition_importance = transition_importance
+
         self.batch_size = batch_size
         self.sample_size = sample_size
         self.max_seg_len = max_seg_len
         self.num_label = num_label
-        self.transition_importance = transition_importance
-        self.with_transition = with_transition
-        
         self.device = device
+        
 
         self.segment_score = torch.zeros(self.batch_size, self.sample_size, self.sample_size, self.num_label)
         self.segment_score = self.segment_score.to(self.device)
@@ -25,8 +28,8 @@ class SemiCRF(nn.Module):
         # the last number in the label index list is BOS tag.
         #self.BOS_TAG_ID = num_label + 1
 
-        self.transitions = nn.Parameter(torch.empty(self.num_label, self.num_label))
-        self.init_weights()
+        #self.transitions = nn.Parameter(torch.empty(self.num_label, self.num_label))
+        #self.init_weights()
 
     def init_weights(self):
         # initialize weights between -0.1 and 0.1
@@ -36,7 +39,6 @@ class SemiCRF(nn.Module):
     def compute_path_score(self, label_gt):
         path_score = torch.zeros(self.batch_size)
         path_score = path_score.to(self.device)
-
 
         for sample_index in range(self.batch_size):
             
@@ -57,8 +59,10 @@ class SemiCRF(nn.Module):
             f_end = f_i
             transition_score_cur = self.transitions[label_pre, label_pre] * (f_end - f_start)
             segment_score_cur = self.segment_score[sample_index, f_start, f_end, label_pre] * (f_end - f_start + 1)
-            path_score[sample_index] += transition_score_cur * self.transition_importance + segment_score_cur
-        
+            path_score[sample_index] += segment_score_cur
+            if self.with_transition:
+                transition_score_cur = self.transitions[label_pre, label_pre] * (f_end - f_start)
+                path_score[sample_index] += transition_score_cur * self.transition_importance
         return path_score
 
     def compute_log_z(self):
@@ -67,10 +71,16 @@ class SemiCRF(nn.Module):
 
         # There is no transition for the single-frame segment at the begining of the sample
         # There is only one possible assignment for each current label so logsumexp is equivalent to identity
+        #print('\nf_end = 0')
         log_alpha[:, 0, :] = self.segment_score[:, 0, 0, :]
+
+        #print('log_alpha_cur:')
+        #print(log_alpha)
         
         for f_end in range(1, self.sample_size):
+            #print(f'\nf_end = {f_end}')
             max_span = min(f_end + 1, self.max_seg_len)
+            #print(f'max_span = {max_span}')
 
             # shape: batch_size, span, num_label_cur
             segment_score = torch.stack([self.segment_score[:, f_end - j + 1, f_end, :] * j for j in range(max_span, 0, -1)], dim=1)
@@ -90,10 +100,10 @@ class SemiCRF(nn.Module):
 
                 if self.with_transition:
                     # shape: batch_size, num_label_cur
-                    feature_score_init += transition_score_init[None, :]
+                    feature_score_init += transition_score_init[None, :] * self.transition_importance
 
                     # shape: batch_size, max_span - 1, num_label_pre, num_label_cur
-                    feature_score += transition_score[None, 1:, :, :]
+                    feature_score = feature_score + transition_score[None, 1:, :, :] * self.transition_importance
 
                 # shape: batch_size, max_span - 1, num_label_pre
                 log_alpha_pre = log_alpha[:, f_end - max_span + 1 : f_end, :]
@@ -104,18 +114,19 @@ class SemiCRF(nn.Module):
                 
                 if self.with_transition:
                     # shape: batch_size, max_span, num_label_pre, num_label_cur
-                    feature_score += transition_score[None, :, :, :]
+                    feature_score = feature_score + transition_score[None, :, :, :] * self.transition_importance
 
                 # shape: batch_size, max_span, num_label_pre
                 log_alpha_pre = log_alpha[:, f_end - max_span: f_end, :]
-            
+
+
             # shape: batch_size, max_span * num_label_pre, num_label_cur
             temp = (log_alpha_pre[:, :, :, None] + feature_score).flatten(start_dim=1, end_dim=2)
 
             if f_end < self.max_seg_len:
                 log_alpha[:, f_end, :] = torch.cat([feature_score_init[:, None, :], temp], dim=1).logsumexp(dim=1)
             else:
-                log_alpha[:, f_end, :] = temp.logsumexp(dim=1)
+                log_alpha[:, f_end, :] = (log_alpha_pre[:, :, :, None] + feature_score).flatten(start_dim=1, end_dim=2).logsumexp(dim=1)
         
         log_z = log_alpha[:, self.sample_size - 1, :].logsumexp(dim=1)
 
@@ -157,10 +168,10 @@ class SemiCRF(nn.Module):
 
                 if self.with_transition:
                     # shape: batch_size, num_label_cur
-                    feature_score_init += transition_score_init[None, :]
+                    feature_score_init += transition_score_init[None, :] * self.transition_importance
 
                     # shape: batch_size, max_span - 1, num_label_pre, num_label_cur
-                    feature_score += transition_score[None, 1:, :, :]
+                    feature_score = feature_score + transition_score[None, 1:, :, :] * self.transition_importance
 
                 # shape: batch_size, max_span - 1, num_label_pre
 
@@ -172,25 +183,13 @@ class SemiCRF(nn.Module):
                 
                 if self.with_transition:
                     # shape: batch_size, max_span, num_label_pre, num_label_cur
-                    feature_score += transition_score[None, :, :, :]
+                    feature_score = feature_score + transition_score[None, :, :, :] * self.transition_importance
 
                 # shape: batch_size, max_span, num_label_pre
                 V_pre = V[:, f_end - max_span: f_end, :]
 
-            '''
-            print('V_pre')
-            print(V_pre[0, ...])
-            print('feature_score')
-            print(feature_score[0, ...])
-            '''
-
             # shape: batch_size, max_span * num_label_pre, num_label_cur
             temp = (V_pre[:, :, :, None] + feature_score).flatten(start_dim=1, end_dim=2)
-
-            '''
-            print('temp')
-            print(temp[0, ...])
-            '''
 
 
             V[:, f_end, :], max_index = temp.max(dim=1)
@@ -222,10 +221,6 @@ class SemiCRF(nn.Module):
 
             segment_offsets.reverse()
             labels.reverse()
-            '''
-            print(segment_offsets)
-            print(labels)
-            '''
 
             segments_sample = list()
             onset_cur = 0
